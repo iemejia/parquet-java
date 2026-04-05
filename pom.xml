@@ -638,5 +638,12 @@
         <module>parquet-plugins/parquet-plugins-benchmarks</module>
       </modules>
     </profile>
+
+    <profile>
+      <id>fuzz</id>
+      <modules>
+        <module>parquet-fuzz</module>
+      </modules>
+    </profile>
   </profiles>
 </project>
