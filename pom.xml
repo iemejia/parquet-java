@@ -154,6 +154,7 @@
     <module>parquet-thrift</module>
     <module>parquet-hadoop-bundle</module>
     <module>parquet-variant</module>
+    <module>parquet-perf</module>
   </modules>
 
   <dependencies>
@@ -555,6 +556,7 @@
             <excludeModules>
               <!-- Excluding the following modules because they are not part of the parquet public API -->
               <excludeModule>parquet-benchmarks</excludeModule>
+              <excludeModule>parquet-perf</excludeModule>
               <excludeModule>parquet-cli</excludeModule>
               <excludeModule>parquet-tools-deprecated</excludeModule>
               <excludeModule>parquet-format-structures</excludeModule>
