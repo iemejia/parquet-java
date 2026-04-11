@@ -613,6 +613,69 @@ scenarios, not just dictionary encoding.
 
 ---
 
+## Round 5: Delta Byte Array Decode Optimization
+
+### Improvement 9: DeltaByteArrayReader — Avoid Hidden Suffix Copies
+
+#### File Changed
+
+`parquet-column/src/main/java/org/apache/parquet/column/values/deltastrings/DeltaByteArrayReader.java`
+
+#### Problem
+
+`DeltaByteArrayReader.readBytes()` already has to materialize a new output array when a value
+shares a prefix with the previous value. The existing implementation did this:
+
+```java
+byte[] out = new byte[length];
+System.arraycopy(previous.getBytesUnsafe(), 0, out, 0, prefixLength);
+System.arraycopy(suffix.getBytesUnsafe(), 0, out, prefixLength, suffix.length());
+```
+
+That looks fine for byte-array-backed suffixes, but many suffix values come from
+`DeltaLengthByteArrayValuesReader` as `ByteBufferBackedBinary`. For that implementation,
+`getBytesUnsafe()` falls back to `getBytes()` and materializes a temporary array before the
+final `System.arraycopy` into `out`.
+
+So the prefix-sharing path was doing:
+
+1. Allocate the final output array
+2. Allocate a temporary suffix array
+3. Copy suffix bytes into the temporary array
+4. Copy them again into the final output array
+
+#### Fix
+
+Keep the single required output allocation, but stream the suffix bytes directly into the
+correct slice of the final array via `Binary.writeTo(...)`:
+
+```java
+byte[] out = new byte[length];
+System.arraycopy(previous.getBytesUnsafe(), 0, out, 0, prefixLength);
+suffix.writeTo(new ByteArraySliceOutputStream(out, prefixLength));
+previous = Binary.fromConstantByteArray(out);
+```
+
+The local `ByteArraySliceOutputStream` is a tiny adapter over the target byte array. This avoids
+the extra hidden suffix materialization while preserving the required final materialized result.
+
+#### Benchmark Results
+
+| Benchmark | Cardinality | StringLength | Before | After | Change |
+|-----------|------------|-------------|--------|-------|--------|
+| `decodeDeltaByteArray` | LOW | 10 | 13,223,223 | 12,859,448 | -2.8% |
+| `decodeDeltaByteArray` | LOW | 100 | 11,596,441 | 12,204,962 | **+5.2%** |
+| `decodeDeltaByteArray` | LOW | 1000 | 7,075,096 | 7,888,881 | **+11.5%** |
+| `decodeDeltaByteArray` | HIGH | 10 | 13,379,741 | 13,889,337 | **+3.8%** |
+| `decodeDeltaByteArray` | HIGH | 100 | 11,675,579 | 12,882,705 | **+10.3%** |
+| `decodeDeltaByteArray` | HIGH | 1000 | 7,697,289 | 8,563,087 | **+11.2%** |
+
+The 10-byte LOW-cardinality case moved slightly down and looks like benchmark noise. The
+important result is that medium and long strings improved consistently, which matches the
+expected reduction in hidden suffix materialization work.
+
+---
+
 ## Updated Summary of All Results
 
 | # | Optimization | Module | Benchmark | Improvement |
@@ -625,6 +688,7 @@ scenarios, not just dictionary encoding.
 | 6 | Delta reader: one slice per miniblock | parquet-column | decodeDelta | **+14%** |
 | 7 | Delta writers: use pack32Values | parquet-column | encodeDelta | **+3.7%** |
 | 8 | Binary: cache hashCode for constants | parquet-column | encodeDictionary | **+43.6% to +6381%** |
+| 9 | DeltaBA reader: avoid hidden suffix copy | parquet-column | decodeDeltaByteArray | **+3.8% to +11.5%** |
 
 ### Test Results
 
@@ -646,6 +710,10 @@ scenarios, not just dictionary encoding.
 
 1. `parquet-column/src/main/java/org/apache/parquet/io/api/Binary.java`
 
+### Files Modified (Round 5)
+
+1. `parquet-column/src/main/java/org/apache/parquet/column/values/deltastrings/DeltaByteArrayReader.java`
+
 ### Commits
 
 ```
@@ -654,4 +722,5 @@ b9a2bc794 Optimize plain int encoding and delta byte array writing
 dfcab6420 Reduce delta decode ByteBuffer slicing overhead
 4cc922e5d Use 32-value packer entry points in delta writers
 0baf1e664 Cache hash codes for constant Binary values
+344c48168 Avoid hidden suffix copies in delta byte array decode
 ```
