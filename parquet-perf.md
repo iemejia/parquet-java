@@ -425,6 +425,130 @@ does not scale down to 4 bytes.
 
 ---
 
+## Round 3: Delta Binary Packing Read/Write Optimizations
+
+### Improvement 6: DeltaBinaryPackingValuesReader — Slice One Buffer Per Mini Block
+
+#### File Changed
+
+`parquet-column/src/main/java/org/apache/parquet/column/values/delta/DeltaBinaryPackingValuesReader.java`
+
+#### Problem
+
+`DeltaBinaryPackingValuesReader.unpackMiniBlock()` unpacked a 32-value mini block by
+calling `unpack8Values()` four times. Each `unpack8Values()` call did its own:
+
+```java
+ByteBuffer buffer = in.slice(packer.getBitWidth());
+packer.unpack8Values(buffer, buffer.position(), valuesBuffer, valuesBuffered);
+```
+
+So the reader created a new `ByteBuffer` view for every 8 decoded values, even though the
+entire mini block is a single contiguous region and the packer can read from any offset
+within the same buffer.
+
+This extra view creation sits directly in the hot loop exercised by
+`IntEncodingBenchmark.decodeDelta`.
+
+#### Fix
+
+Slice the whole mini block once, then reuse that `ByteBuffer` while advancing an integer
+byte offset for each 8-value unpack:
+
+```java
+int bitWidth = packer.getBitWidth();
+int valueCount = config.miniBlockSizeInValues;
+ByteBuffer buffer = in.slice((valueCount / 8) * bitWidth);
+int bufferPosition = buffer.position();
+for (int j = 0, byteOffset = 0; j < valueCount; j += 8, byteOffset += bitWidth) {
+    unpack8Values(packer, buffer, bufferPosition + byteOffset);
+}
+```
+
+This keeps the existing zero-copy decode behavior while removing repeated `ByteBuffer`
+slice/view creation from the inner loop.
+
+#### Benchmark Results
+
+| Benchmark | Pattern | Before | After | Change |
+|-----------|---------|--------|-------|--------|
+| `IntEncodingBenchmark.decodeDelta` | SEQUENTIAL | 134,704,344 | 153,029,731 | **+13.6%** |
+| `IntEncodingBenchmark.decodeDelta` | RANDOM | 62,612,403 | 72,668,010 | **+16.1%** |
+| `IntEncodingBenchmark.decodeDelta` | LOW_CARDINALITY | 90,060,758 | 101,872,030 | **+13.1%** |
+| `IntEncodingBenchmark.decodeDelta` | HIGH_CARDINALITY | 132,037,344 | 150,930,552 | **+14.3%** |
+
+Average across all patterns: **~104.9M → ~119.6M ops/s (+14%)**
+
+---
+
+### Improvement 7: Delta Binary Packing Writers — Use `pack32Values`
+
+#### Files Changed
+
+`parquet-column/src/main/java/org/apache/parquet/column/values/delta/DeltaBinaryPackingValuesWriterForInteger.java`
+
+`parquet-column/src/main/java/org/apache/parquet/column/values/delta/DeltaBinaryPackingValuesWriterForLong.java`
+
+#### Problem
+
+Each delta writer flushed a 32-value mini block using four separate `pack8Values()` calls:
+
+```java
+for (int j = miniBlockStart; j < (i + 1) * config.miniBlockSizeInValues; j += 8) {
+    packer.pack8Values(deltaBlockBuffer, j, miniBlockByteBuffer, blockOffset);
+    blockOffset += currentBitWidth;
+}
+```
+
+But the generated packer API already exposes a `pack32Values(...)` entry point for exactly
+this case, and the current format always flushes mini blocks as full 32-value groups.
+
+That means each mini block was paying for four virtual calls and four loop iterations when
+one call would do.
+
+#### Fix
+
+Replace the inner `pack8Values` loop with a single `pack32Values` call and a fixed byte count:
+
+```java
+packer.pack32Values(deltaBlockBuffer, miniBlockStart, miniBlockByteBuffer, 0);
+baos.write(miniBlockByteBuffer, 0, currentBitWidth * 4);
+```
+
+This was applied to both the integer and long delta writers so the change helps both the
+direct `encodeDelta` benchmark and the length side of `DeltaLengthByteArrayValuesWriter`.
+
+#### Benchmark Results
+
+Primary target:
+
+| Benchmark | Pattern | Before | After | Change |
+|-----------|---------|--------|-------|--------|
+| `IntEncodingBenchmark.encodeDelta` | SEQUENTIAL | 72,386,638 | 74,189,071 | **+2.5%** |
+| `IntEncodingBenchmark.encodeDelta` | RANDOM | 49,024,283 | 51,387,152 | **+4.8%** |
+| `IntEncodingBenchmark.encodeDelta` | LOW_CARDINALITY | 57,774,044 | 61,434,736 | **+6.3%** |
+| `IntEncodingBenchmark.encodeDelta` | HIGH_CARDINALITY | 71,961,199 | 73,436,517 | **+2.0%** |
+
+Average across all patterns: **~62.8M → ~65.1M ops/s (+3.7%)**
+
+Adjacent benchmark checked because it reuses the same delta writer path for lengths:
+
+| Benchmark | Cardinality | StringLength | Before | After | Change |
+|-----------|------------|-------------|--------|-------|--------|
+| `encodeDeltaLengthByteArray` | LOW | 10 | 20,968,152 | 21,599,885 | **+3.0%** |
+| `encodeDeltaLengthByteArray` | LOW | 100 | 6,513,995 | 6,742,292 | **+3.5%** |
+| `encodeDeltaLengthByteArray` | LOW | 1000 | 844,501 | 834,686 | -1.2% |
+| `encodeDeltaLengthByteArray` | HIGH | 10 | 19,833,467 | 19,137,464 | -3.5% |
+| `encodeDeltaLengthByteArray` | HIGH | 100 | 5,798,235 | 5,651,538 | -2.5% |
+| `encodeDeltaLengthByteArray` | HIGH | 1000 | 694,440 | 713,940 | **+2.8%** |
+
+The direct target (`encodeDelta`) improved consistently. `encodeDeltaLengthByteArray` was mixed,
+which is expected because delta-length encoding combines the delta int path with the dominant
+binary payload write cost. The change was kept based on the clear positive result in the direct
+delta-int benchmark.
+
+---
+
 ## Updated Summary of All Results
 
 | # | Optimization | Module | Benchmark | Improvement |
@@ -434,6 +558,8 @@ does not scale down to 4 bytes.
 | 3 | BSS reader: cache-friendly loop | parquet-column | decodeByteStreamSplit | **+87.2%** |
 | 4 | LE output: bulk writeInt/writeShort | parquet-common | encodePlain | **+35%** |
 | 5 | DeltaBA writer: avoid array copy | parquet-column | encodeDeltaByteArray | **+21.6%** |
+| 6 | Delta reader: one slice per miniblock | parquet-column | decodeDelta | **+14%** |
+| 7 | Delta writers: use pack32Values | parquet-column | encodeDelta | **+3.7%** |
 
 ### Test Results
 
@@ -445,9 +571,17 @@ does not scale down to 4 bytes.
 1. `parquet-common/src/main/java/org/apache/parquet/bytes/LittleEndianDataOutputStream.java`
 2. `parquet-column/src/main/java/org/apache/parquet/column/values/deltastrings/DeltaByteArrayWriter.java`
 
+### Files Modified (Round 3)
+
+1. `parquet-column/src/main/java/org/apache/parquet/column/values/delta/DeltaBinaryPackingValuesReader.java`
+2. `parquet-column/src/main/java/org/apache/parquet/column/values/delta/DeltaBinaryPackingValuesWriterForInteger.java`
+3. `parquet-column/src/main/java/org/apache/parquet/column/values/delta/DeltaBinaryPackingValuesWriterForLong.java`
+
 ### Commits
 
 ```
 136c751f1 Optimize encoding hot paths: ByteStreamSplit writer/reader and RLE decoder
 b9a2bc794 Optimize plain int encoding and delta byte array writing
+dfcab6420 Reduce delta decode ByteBuffer slicing overhead
+4cc922e5d Use 32-value packer entry points in delta writers
 ```
