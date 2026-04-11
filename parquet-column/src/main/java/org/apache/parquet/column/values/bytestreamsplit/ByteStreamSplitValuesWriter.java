@@ -99,6 +99,32 @@ public abstract class ByteStreamSplitValuesWriter extends ValuesWriter {
     }
   }
 
+  /**
+   * Scatter a 4-byte integer value directly to the byte streams in little-endian order,
+   * avoiding the intermediate byte[] allocation of {@link BytesUtils#intToBytes(int)}.
+   */
+  protected void scatterInt(int v) {
+    this.byteStreams[0].write(v & 0xFF);
+    this.byteStreams[1].write((v >>> 8) & 0xFF);
+    this.byteStreams[2].write((v >>> 16) & 0xFF);
+    this.byteStreams[3].write((v >>> 24) & 0xFF);
+  }
+
+  /**
+   * Scatter an 8-byte long value directly to the byte streams in little-endian order,
+   * avoiding the intermediate byte[] allocation of {@link BytesUtils#longToBytes(long)}.
+   */
+  protected void scatterLong(long v) {
+    this.byteStreams[0].write((int) (v & 0xFF));
+    this.byteStreams[1].write((int) ((v >>> 8) & 0xFF));
+    this.byteStreams[2].write((int) ((v >>> 16) & 0xFF));
+    this.byteStreams[3].write((int) ((v >>> 24) & 0xFF));
+    this.byteStreams[4].write((int) ((v >>> 32) & 0xFF));
+    this.byteStreams[5].write((int) ((v >>> 40) & 0xFF));
+    this.byteStreams[6].write((int) ((v >>> 48) & 0xFF));
+    this.byteStreams[7].write((int) ((v >>> 56) & 0xFF));
+  }
+
   @Override
   public long getAllocatedSize() {
     long totalCapacity = 0;
@@ -116,7 +142,7 @@ public abstract class ByteStreamSplitValuesWriter extends ValuesWriter {
 
     @Override
     public void writeFloat(float v) {
-      super.scatterBytes(BytesUtils.intToBytes(Float.floatToIntBits(v)));
+      scatterInt(Float.floatToIntBits(v));
     }
 
     @Override
@@ -133,7 +159,7 @@ public abstract class ByteStreamSplitValuesWriter extends ValuesWriter {
 
     @Override
     public void writeDouble(double v) {
-      super.scatterBytes(BytesUtils.longToBytes(Double.doubleToLongBits(v)));
+      scatterLong(Double.doubleToLongBits(v));
     }
 
     @Override
@@ -149,7 +175,7 @@ public abstract class ByteStreamSplitValuesWriter extends ValuesWriter {
 
     @Override
     public void writeInteger(int v) {
-      super.scatterBytes(BytesUtils.intToBytes(v));
+      scatterInt(v);
     }
 
     @Override
@@ -165,7 +191,7 @@ public abstract class ByteStreamSplitValuesWriter extends ValuesWriter {
 
     @Override
     public void writeLong(long v) {
-      super.scatterBytes(BytesUtils.longToBytes(v));
+      scatterLong(v);
     }
 
     @Override
