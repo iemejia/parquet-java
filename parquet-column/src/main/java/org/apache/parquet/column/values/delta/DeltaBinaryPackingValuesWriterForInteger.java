@@ -116,18 +116,12 @@ public class DeltaBinaryPackingValuesWriterForInteger extends DeltaBinaryPacking
     for (int i = 0; i < miniBlocksToFlush; i++) {
       // writing i th miniblock
       int currentBitWidth = bitWidths[i];
-      int blockOffset = 0;
       BytePacker packer = Packer.LITTLE_ENDIAN.newBytePacker(currentBitWidth);
       int miniBlockStart = i * config.miniBlockSizeInValues;
-      for (int j = miniBlockStart; j < (i + 1) * config.miniBlockSizeInValues; j += 8) { // 8 values per pack
-        // mini block is atomic in terms of flushing
-        // This may write more values when reach to the end of data writing to last mini block,
-        // since it may not be aligned to miniblock,
-        // but doesn't matter. The reader uses total count to see if reached the end.
-        packer.pack8Values(deltaBlockBuffer, j, miniBlockByteBuffer, blockOffset);
-        blockOffset += currentBitWidth;
-      }
-      baos.write(miniBlockByteBuffer, 0, blockOffset);
+      // Mini blocks are always flushed as full 32-value groups in the current format.
+      // Use the packer's 32-value entry point to avoid four pack8Values calls per miniblock.
+      packer.pack32Values(deltaBlockBuffer, miniBlockStart, miniBlockByteBuffer, 0);
+      baos.write(miniBlockByteBuffer, 0, currentBitWidth * 4);
     }
 
     minDeltaInCurrentBlock = Integer.MAX_VALUE;
