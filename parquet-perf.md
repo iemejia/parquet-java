@@ -6,10 +6,11 @@ This document describes the performance analysis and optimizations applied to th
 parquet-java (formerly parquet-mr) encoding hot paths, driven by profiling the existing
 JMH benchmarks in the `parquet-benchmarks` module.
 
-Three optimizations were implemented in the `parquet-column` module, targeting the
-encoding and decoding paths exercised by `IntEncodingBenchmark`, `BinaryEncodingBenchmark`,
-and `FileReadBenchmark`. All changes were validated with JMH benchmarks and the full
-`parquet-column` test suite (573 tests, 0 failures).
+Ten validated optimizations were implemented across `parquet-common` and `parquet-column`,
+targeting the encoding and decoding paths exercised by `IntEncodingBenchmark`,
+`BinaryEncodingBenchmark`, and `FileReadBenchmark`. All accepted changes were validated with
+JMH benchmarks and the full `parquet-common` (308 tests, 0 failures, 0 errors) and
+`parquet-column` (573 tests, 0 failures, 0 errors) test suites.
 
 ---
 
@@ -676,6 +677,93 @@ expected reduction in hidden suffix materialization work.
 
 ---
 
+## Round 6: Dictionary ID Bit-Packing Optimization
+
+### Improvement 10: RunLengthBitPackingHybridEncoder — Use `pack32Values` for Bit-Packed Runs
+
+#### File Changed
+
+`parquet-column/src/main/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridEncoder.java`
+
+#### Problem
+
+`DictionaryValuesWriter.getBytes()` feeds dictionary IDs through
+`RunLengthBitPackingHybridEncoder`. In the bit-packed path, every 8-value group did its own:
+
+```java
+packer.pack8Values(bufferedValues, 0, packBuffer, 0);
+baos.write(packBuffer);
+```
+
+The generated packers already expose a `pack32Values(...)` entry point. That meant long
+bit-packed dictionary ID runs were still paying for four pack calls and four output writes
+for every 32 values.
+
+#### Fix
+
+Added a 32-value staging buffer for bit-packed runs. The encoder now accumulates four 8-value
+groups, flushes full chunks with `pack32Values(...)`, and falls back to `pack8Values(...)`
+only when a run ends with fewer than 32 staged values. The on-wire format stays unchanged
+because run headers are still counted in 8-value groups.
+
+#### Benchmark Results
+
+`BinaryEncodingBenchmark.encodeDictionary`:
+
+| Cardinality | StringLength | Before | After | Change |
+|-----------|-------------|--------|-------|--------|
+| LOW | 10 | 20,016,546 | 20,241,575 | **+1.1%** |
+| LOW | 100 | 18,021,292 | 18,026,227 | +0.0% |
+| LOW | 1000 | 21,780,198 | 21,973,367 | **+0.9%** |
+| HIGH | 10 | 1,339,528 | 1,354,035 | **+1.1%** |
+| HIGH | 100 | 1,334,816 | 1,333,783 | -0.1% |
+| HIGH | 1000 | 1,163,105 | 1,302,550 | **+12.0%** |
+
+`IntEncodingBenchmark.encodeDictionary`:
+
+| Pattern | Before | After | Change |
+|-----------|--------|-------|--------|
+| SEQUENTIAL | 2,977,430 | 3,082,282 | **+3.5%** |
+| RANDOM | 3,027,118 | 3,065,328 | **+1.3%** |
+| LOW_CARDINALITY | 19,181,636 | 19,135,921 | -0.2% |
+| HIGH_CARDINALITY | 2,945,972 | 3,051,820 | **+3.6%** |
+
+The strongest gain showed up in the long-string high-cardinality binary case, where the
+dictionary ID stream stays bit-packed for long stretches. The two small negative moves are
+within noise and did not reproduce as meaningful regressions elsewhere.
+
+---
+
+### Investigation: `BytesInput.toByteArray()` Direct Materialization (REVERTED)
+
+Temporary files changed during the experiment:
+
+- `parquet-common/src/main/java/org/apache/parquet/bytes/BytesInput.java`
+- `parquet-common/src/main/java/org/apache/parquet/bytes/CapacityByteArrayOutputStream.java`
+
+#### Hypothesis
+
+All encode benchmarks end by materializing `writer.getBytes().toByteArray()`, so replacing the
+`ByteArrayOutputStream`-based path with direct writes into the final `byte[]` looked like a
+promising shared encode-side optimization.
+
+#### Result
+
+The end-to-end encode benchmarks regressed overall. Largest regressions from the dedicated
+before/after run:
+
+| Benchmark | Params | Before | After | Change |
+|-----------|--------|--------|-------|--------|
+| `encodeByteStreamSplit` | SEQUENTIAL | 22,971,724 | 20,101,829 | **-12.5%** |
+| `encodeByteStreamSplit` | RANDOM | 22,485,490 | 20,009,562 | **-11.0%** |
+| `encodeDictionary` | HIGH_CARDINALITY | 3,030,307 | 2,774,764 | **-8.4%** |
+| `encodePlain` | SEQUENTIAL | 28,461,041 | 26,655,025 | **-6.3%** |
+
+Some binary encode cases moved up slightly, but the shared change was clearly regressive overall.
+The experiment was fully reverted.
+
+---
+
 ## Updated Summary of All Results
 
 | # | Optimization | Module | Benchmark | Improvement |
@@ -689,6 +777,7 @@ expected reduction in hidden suffix materialization work.
 | 7 | Delta writers: use pack32Values | parquet-column | encodeDelta | **+3.7%** |
 | 8 | Binary: cache hashCode for constants | parquet-column | encodeDictionary | **+43.6% to +6381%** |
 | 9 | DeltaBA reader: avoid hidden suffix copy | parquet-column | decodeDeltaByteArray | **+3.8% to +11.5%** |
+| 10 | RLE encoder: batch bit-packed groups | parquet-column | encodeDictionary | **up to +12.0%** |
 
 ### Test Results
 
@@ -714,6 +803,10 @@ expected reduction in hidden suffix materialization work.
 
 1. `parquet-column/src/main/java/org/apache/parquet/column/values/deltastrings/DeltaByteArrayReader.java`
 
+### Files Modified (Round 6)
+
+1. `parquet-column/src/main/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridEncoder.java`
+
 ### Commits
 
 ```
@@ -723,4 +816,5 @@ dfcab6420 Reduce delta decode ByteBuffer slicing overhead
 4cc922e5d Use 32-value packer entry points in delta writers
 0baf1e664 Cache hash codes for constant Binary values
 344c48168 Avoid hidden suffix copies in delta byte array decode
+5b9f66494 Use pack32Values in RLE hybrid encoder
 ```
