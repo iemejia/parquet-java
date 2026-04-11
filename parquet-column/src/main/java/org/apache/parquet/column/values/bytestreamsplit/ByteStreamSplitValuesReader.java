@@ -49,17 +49,21 @@ public abstract class ByteStreamSplitValuesReader extends ValuesReader {
     return offset;
   }
 
-  // Decode an entire data page
+  // Decode an entire data page.
+  // Iterates per-stream (outer loop) for sequential read access on the encoded buffer,
+  // writing to the decoded buffer at a small stride of elementSizeInBytes.
+  // This is cache-friendlier than the inverse loop order for large pages because
+  // sequential reads are well-served by CPU prefetchers, and the write stride
+  // (4 or 8 bytes for typical types) is small enough to stay within L1/L2 cache.
   private byte[] decodeData(ByteBuffer encoded, int valuesCount) {
     assert encoded.limit() == valuesCount * elementSizeInBytes;
     byte[] decoded = new byte[encoded.limit()];
-    int destByteIndex = 0;
-    for (int srcValueIndex = 0; srcValueIndex < valuesCount; ++srcValueIndex) {
-      for (int stream = 0; stream < elementSizeInBytes; ++stream, ++destByteIndex) {
-        decoded[destByteIndex] = encoded.get(srcValueIndex + stream * valuesCount);
+    for (int stream = 0; stream < elementSizeInBytes; ++stream) {
+      int srcOffset = stream * valuesCount;
+      for (int i = 0; i < valuesCount; ++i) {
+        decoded[i * elementSizeInBytes + stream] = encoded.get(srcOffset + i);
       }
     }
-    assert destByteIndex == decoded.length;
     return decoded;
   }
 
