@@ -36,6 +36,8 @@ import org.apache.parquet.schema.PrimitiveComparator;
 public abstract class Binary implements Comparable<Binary>, Serializable {
 
   protected boolean isBackingBytesReused;
+  private transient int cachedHashCode;
+  private transient boolean hashCodeCached;
 
   // this isn't really something others should extend
   private Binary() {}
@@ -99,6 +101,22 @@ public abstract class Binary implements Comparable<Binary>, Serializable {
       return equals((Binary) obj);
     }
     return false;
+  }
+
+  final int cacheHashCode(int hashCode) {
+    if (!isBackingBytesReused) {
+      cachedHashCode = hashCode;
+      hashCodeCached = true;
+    }
+    return hashCode;
+  }
+
+  final boolean isHashCodeCached() {
+    return hashCodeCached;
+  }
+
+  final int getCachedHashCode() {
+    return cachedHashCode;
   }
 
   @Override
@@ -180,7 +198,10 @@ public abstract class Binary implements Comparable<Binary>, Serializable {
 
     @Override
     public int hashCode() {
-      return Binary.hashCode(value, offset, length);
+      if (isHashCodeCached()) {
+        return getCachedHashCode();
+      }
+      return cacheHashCode(Binary.hashCode(value, offset, length));
     }
 
     @Override
@@ -340,7 +361,10 @@ public abstract class Binary implements Comparable<Binary>, Serializable {
 
     @Override
     public int hashCode() {
-      return Binary.hashCode(value, 0, value.length);
+      if (isHashCodeCached()) {
+        return getCachedHashCode();
+      }
+      return cacheHashCode(Binary.hashCode(value, 0, value.length));
     }
 
     @Override
@@ -499,11 +523,17 @@ public abstract class Binary implements Comparable<Binary>, Serializable {
 
     @Override
     public int hashCode() {
-      if (value.hasArray()) {
-        return Binary.hashCode(value.array(), value.arrayOffset() + offset, length);
-      } else {
-        return Binary.hashCode(value, offset, length);
+      if (isHashCodeCached()) {
+        return getCachedHashCode();
       }
+
+      int computedHashCode;
+      if (value.hasArray()) {
+        computedHashCode = Binary.hashCode(value.array(), value.arrayOffset() + offset, length);
+      } else {
+        computedHashCode = Binary.hashCode(value, offset, length);
+      }
+      return cacheHashCode(computedHashCode);
     }
 
     @Override
