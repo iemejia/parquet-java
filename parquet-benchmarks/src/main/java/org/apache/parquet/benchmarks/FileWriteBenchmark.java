@@ -16,9 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.parquet.perf.file;
+package org.apache.parquet.benchmarks;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
@@ -26,37 +25,26 @@ import org.apache.parquet.column.ParquetProperties.WriterVersion;
 import org.apache.parquet.example.data.Group;
 import org.apache.parquet.example.data.simple.SimpleGroupFactory;
 import org.apache.parquet.hadoop.ParquetFileWriter;
-import org.apache.parquet.hadoop.ParquetReader;
 import org.apache.parquet.hadoop.ParquetWriter;
-import org.apache.parquet.hadoop.api.ReadSupport;
 import org.apache.parquet.hadoop.example.ExampleParquetWriter;
-import org.apache.parquet.hadoop.example.GroupReadSupport;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
-import org.apache.parquet.io.InputFile;
-import org.apache.parquet.io.LocalInputFile;
-import org.apache.parquet.io.LocalOutputFile;
-import org.apache.parquet.perf.util.TestDataFactory;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
-import org.openjdk.jmh.annotations.Level;
 import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
 import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
-import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
-import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Warmup;
-import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * File-level read benchmarks measuring throughput of the full Parquet read pipeline.
- * A temporary file is generated during setup using {@link LocalOutputFile} (no Hadoop FS
- * overhead on write side), then read repeatedly during the benchmark.
+ * File-level write benchmarks measuring throughput of the full Parquet write pipeline.
+ * Writes are sent to a {@link BlackHoleOutputFile} to isolate CPU/encoding cost from
+ * filesystem I/O.
  *
- * <p>Parameterized across compression codec and writer version.
+ * <p>Parameterized across compression codec, writer version, and dictionary encoding.
  */
 @BenchmarkMode({Mode.SingleShotTime, Mode.AverageTime})
 @Fork(1)
@@ -64,7 +52,7 @@ import org.openjdk.jmh.infra.Blackhole;
 @Measurement(iterations = 5, batchSize = 1)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Benchmark)
-public class FileReadBenchmark {
+public class FileWriteBenchmark {
 
   @Param({"UNCOMPRESSED", "SNAPPY", "ZSTD", "GZIP"})
   public String codec;
@@ -72,49 +60,22 @@ public class FileReadBenchmark {
   @Param({"PARQUET_1_0", "PARQUET_2_0"})
   public String writerVersion;
 
-  private File tempFile;
+  @Param({"true", "false"})
+  public String dictionary;
 
-  @Setup(Level.Trial)
-  public void setup() throws IOException {
-    tempFile = File.createTempFile("parquet-read-bench-", ".parquet");
-    tempFile.deleteOnExit();
-    tempFile.delete(); // remove so the writer can create it
-
+  @Benchmark
+  public void writeFile() throws IOException {
     SimpleGroupFactory factory = TestDataFactory.newGroupFactory();
     Random random = new Random(42);
-    try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(
-            new LocalOutputFile(tempFile.toPath()))
+    try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(BlackHoleOutputFile.INSTANCE)
         .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
         .withType(TestDataFactory.FILE_BENCHMARK_SCHEMA)
         .withCompressionCodec(CompressionCodecName.valueOf(codec))
         .withWriterVersion(WriterVersion.valueOf(writerVersion))
-        .withDictionaryEncoding(true)
+        .withDictionaryEncoding(Boolean.parseBoolean(dictionary))
         .build()) {
       for (int i = 0; i < TestDataFactory.DEFAULT_ROW_COUNT; i++) {
         writer.write(TestDataFactory.generateRow(factory, i, random));
-      }
-    }
-  }
-
-  @TearDown(Level.Trial)
-  public void tearDown() {
-    if (tempFile != null && tempFile.exists()) {
-      tempFile.delete();
-    }
-  }
-
-  @Benchmark
-  public void readFile(Blackhole bh) throws IOException {
-    InputFile inputFile = new LocalInputFile(tempFile.toPath());
-    try (ParquetReader<Group> reader = new ParquetReader.Builder<Group>(inputFile) {
-      @Override
-      protected ReadSupport<Group> getReadSupport() {
-        return new GroupReadSupport();
-      }
-    }.build()) {
-      Group group;
-      while ((group = reader.read()) != null) {
-        bh.consume(group);
       }
     }
   }

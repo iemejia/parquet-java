@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.parquet.perf.encoding;
+package org.apache.parquet.benchmarks;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -26,15 +26,13 @@ import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.HeapByteBufferAllocator;
 import org.apache.parquet.column.Encoding;
 import org.apache.parquet.column.values.ValuesWriter;
-import org.apache.parquet.column.values.deltalengthbytearray.DeltaLengthByteArrayValuesReader;
-import org.apache.parquet.column.values.deltalengthbytearray.DeltaLengthByteArrayValuesWriter;
-import org.apache.parquet.column.values.deltastrings.DeltaByteArrayReader;
-import org.apache.parquet.column.values.deltastrings.DeltaByteArrayWriter;
+import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesReaderForInteger;
+import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesWriter;
+import org.apache.parquet.column.values.delta.DeltaBinaryPackingValuesReader;
+import org.apache.parquet.column.values.delta.DeltaBinaryPackingValuesWriterForInteger;
 import org.apache.parquet.column.values.dictionary.DictionaryValuesWriter;
-import org.apache.parquet.column.values.plain.BinaryPlainValuesReader;
+import org.apache.parquet.column.values.plain.PlainValuesReader;
 import org.apache.parquet.column.values.plain.PlainValuesWriter;
-import org.apache.parquet.io.api.Binary;
-import org.apache.parquet.perf.util.TestDataFactory;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -51,9 +49,9 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Encoding-level micro-benchmarks for BINARY values.
- * Compares PLAIN, DELTA_BYTE_ARRAY, DELTA_LENGTH_BYTE_ARRAY, and DICTIONARY encodings
- * across different string lengths and cardinality patterns.
+ * Encoding-level micro-benchmarks for INT32 values.
+ * Compares PLAIN, DELTA_BINARY_PACKED, BYTE_STREAM_SPLIT, and DICTIONARY encodings
+ * across different data distribution patterns.
  *
  * <p>Each benchmark invocation processes {@value #VALUE_COUNT} values. Throughput is
  * reported per-value using {@link OperationsPerInvocation}.
@@ -64,40 +62,51 @@ import org.openjdk.jmh.infra.Blackhole;
 @Warmup(iterations = 3, time = 1)
 @Measurement(iterations = 5, time = 1)
 @State(Scope.Thread)
-public class BinaryEncodingBenchmark {
+public class IntEncodingBenchmark {
 
   static final int VALUE_COUNT = 100_000;
   private static final int INIT_SLAB_SIZE = 64 * 1024;
-  private static final int PAGE_SIZE = 4 * 1024 * 1024;
-  private static final int MAX_DICT_BYTE_SIZE = 4 * 1024 * 1024;
+  private static final int PAGE_SIZE = 1024 * 1024;
+  private static final int MAX_DICT_BYTE_SIZE = 1024 * 1024;
 
-  @Param({"10", "100", "1000"})
-  public int stringLength;
+  @Param({"SEQUENTIAL", "RANDOM", "LOW_CARDINALITY", "HIGH_CARDINALITY"})
+  public String dataPattern;
 
-  /** LOW = 100 distinct values; HIGH = all unique. */
-  @Param({"LOW", "HIGH"})
-  public String cardinality;
-
-  private Binary[] data;
+  private int[] data;
   private byte[] plainEncoded;
-  private byte[] deltaLengthEncoded;
-  private byte[] deltaStringsEncoded;
+  private byte[] deltaEncoded;
+  private byte[] bssEncoded;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
     Random random = new Random(42);
-    int distinct = "LOW".equals(cardinality) ? TestDataFactory.LOW_CARDINALITY_DISTINCT : 0;
-    data = TestDataFactory.generateBinaryData(VALUE_COUNT, stringLength, distinct, random);
+    switch (dataPattern) {
+      case "SEQUENTIAL":
+        data = TestDataFactory.generateSequentialInts(VALUE_COUNT);
+        break;
+      case "RANDOM":
+        data = TestDataFactory.generateRandomInts(VALUE_COUNT, random);
+        break;
+      case "LOW_CARDINALITY":
+        data = TestDataFactory.generateLowCardinalityInts(
+            VALUE_COUNT, TestDataFactory.LOW_CARDINALITY_DISTINCT, random);
+        break;
+      case "HIGH_CARDINALITY":
+        data = TestDataFactory.generateHighCardinalityInts(VALUE_COUNT);
+        break;
+      default:
+        throw new IllegalArgumentException("Unknown data pattern: " + dataPattern);
+    }
 
     // Pre-encode data for decode benchmarks
-    plainEncoded = encodeBinaryWith(newPlainWriter());
-    deltaLengthEncoded = encodeBinaryWith(newDeltaLengthWriter());
-    deltaStringsEncoded = encodeBinaryWith(newDeltaStringsWriter());
+    plainEncoded = encodeWith(newPlainWriter());
+    deltaEncoded = encodeWith(newDeltaWriter());
+    bssEncoded = encodeWith(newBssWriter());
   }
 
-  private byte[] encodeBinaryWith(ValuesWriter writer) throws IOException {
-    for (Binary v : data) {
-      writer.writeBytes(v);
+  private byte[] encodeWith(ValuesWriter writer) throws IOException {
+    for (int v : data) {
+      writer.writeInteger(v);
     }
     byte[] bytes = writer.getBytes().toByteArray();
     writer.close();
@@ -110,16 +119,18 @@ public class BinaryEncodingBenchmark {
     return new PlainValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
   }
 
-  private static DeltaLengthByteArrayValuesWriter newDeltaLengthWriter() {
-    return new DeltaLengthByteArrayValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+  private static DeltaBinaryPackingValuesWriterForInteger newDeltaWriter() {
+    return new DeltaBinaryPackingValuesWriterForInteger(
+        INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
   }
 
-  private static DeltaByteArrayWriter newDeltaStringsWriter() {
-    return new DeltaByteArrayWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+  private static ByteStreamSplitValuesWriter.IntegerByteStreamSplitValuesWriter newBssWriter() {
+    return new ByteStreamSplitValuesWriter.IntegerByteStreamSplitValuesWriter(
+        INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
   }
 
-  private static DictionaryValuesWriter.PlainBinaryDictionaryValuesWriter newDictWriter() {
-    return new DictionaryValuesWriter.PlainBinaryDictionaryValuesWriter(
+  private static DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter newDictWriter() {
+    return new DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter(
         MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
   }
 
@@ -128,25 +139,25 @@ public class BinaryEncodingBenchmark {
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
   public byte[] encodePlain() throws IOException {
-    return encodeBinaryWith(newPlainWriter());
+    return encodeWith(newPlainWriter());
   }
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public byte[] encodeDeltaLengthByteArray() throws IOException {
-    return encodeBinaryWith(newDeltaLengthWriter());
+  public byte[] encodeDelta() throws IOException {
+    return encodeWith(newDeltaWriter());
   }
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public byte[] encodeDeltaByteArray() throws IOException {
-    return encodeBinaryWith(newDeltaStringsWriter());
+  public byte[] encodeByteStreamSplit() throws IOException {
+    return encodeWith(newBssWriter());
   }
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
   public byte[] encodeDictionary() throws IOException {
-    return encodeBinaryWith(newDictWriter());
+    return encodeWith(newDictWriter());
   }
 
   // ---- Decode benchmarks ----
@@ -154,30 +165,30 @@ public class BinaryEncodingBenchmark {
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
   public void decodePlain(Blackhole bh) throws IOException {
-    BinaryPlainValuesReader reader = new BinaryPlainValuesReader();
+    PlainValuesReader.IntegerPlainValuesReader reader = new PlainValuesReader.IntegerPlainValuesReader();
     reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(plainEncoded)));
     for (int i = 0; i < VALUE_COUNT; i++) {
-      bh.consume(reader.readBytes());
+      bh.consume(reader.readInteger());
     }
   }
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public void decodeDeltaLengthByteArray(Blackhole bh) throws IOException {
-    DeltaLengthByteArrayValuesReader reader = new DeltaLengthByteArrayValuesReader();
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(deltaLengthEncoded)));
+  public void decodeDelta(Blackhole bh) throws IOException {
+    DeltaBinaryPackingValuesReader reader = new DeltaBinaryPackingValuesReader();
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(deltaEncoded)));
     for (int i = 0; i < VALUE_COUNT; i++) {
-      bh.consume(reader.readBytes());
+      bh.consume(reader.readInteger());
     }
   }
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public void decodeDeltaByteArray(Blackhole bh) throws IOException {
-    DeltaByteArrayReader reader = new DeltaByteArrayReader();
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(deltaStringsEncoded)));
+  public void decodeByteStreamSplit(Blackhole bh) throws IOException {
+    ByteStreamSplitValuesReaderForInteger reader = new ByteStreamSplitValuesReaderForInteger();
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(bssEncoded)));
     for (int i = 0; i < VALUE_COUNT; i++) {
-      bh.consume(reader.readBytes());
+      bh.consume(reader.readInteger());
     }
   }
 }

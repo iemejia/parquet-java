@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.parquet.perf.concurrent;
+package org.apache.parquet.benchmarks;
 
 import java.io.File;
 import java.io.IOException;
@@ -33,8 +33,6 @@ import org.apache.parquet.hadoop.example.GroupReadSupport;
 import org.apache.parquet.io.InputFile;
 import org.apache.parquet.io.LocalInputFile;
 import org.apache.parquet.io.LocalOutputFile;
-import org.apache.parquet.perf.util.BlackHoleOutputFile;
-import org.apache.parquet.perf.util.TestDataFactory;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -55,9 +53,9 @@ import org.openjdk.jmh.infra.Blackhole;
  * under concurrency. Uses {@code @Threads(4)} by default (overridable via JMH {@code -t} flag).
  *
  * <ul>
- *   <li>{@link #concurrentWrite()} – each thread independently writes to a shared
+ *   <li>{@link #concurrentWrite()} - each thread independently writes to a shared
  *       {@link BlackHoleOutputFile} (stateless sink)</li>
- *   <li>{@link #concurrentRead(Blackhole)} – each thread independently reads the same
+ *   <li>{@link #concurrentRead(Blackhole)} - each thread independently reads the same
  *       pre-generated Parquet file</li>
  * </ul>
  */

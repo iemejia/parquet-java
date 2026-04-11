@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.parquet.perf.util;
+package org.apache.parquet.benchmarks;
 
 import java.io.IOException;
 import org.apache.parquet.io.OutputFile;

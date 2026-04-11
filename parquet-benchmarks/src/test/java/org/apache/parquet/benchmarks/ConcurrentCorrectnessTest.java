@@ -16,10 +16,9 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.parquet.perf.correctness;
+package org.apache.parquet.benchmarks;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
 
 import java.io.File;
 import java.io.IOException;
@@ -42,7 +41,6 @@ import org.apache.parquet.hadoop.example.GroupReadSupport;
 import org.apache.parquet.io.InputFile;
 import org.apache.parquet.io.LocalInputFile;
 import org.apache.parquet.io.LocalOutputFile;
-import org.apache.parquet.perf.util.TestDataFactory;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -135,7 +133,8 @@ public class ConcurrentCorrectnessTest {
         float expectedFloat = expectedRandom.nextFloat();
         double expectedDouble = expectedRandom.nextDouble();
         assertEquals("float_field mismatch at row " + i, expectedFloat, group.getFloat("float_field", 0), 0.0f);
-        assertEquals("double_field mismatch at row " + i, expectedDouble, group.getDouble("double_field", 0), 0.0);
+        assertEquals(
+            "double_field mismatch at row " + i, expectedDouble, group.getDouble("double_field", 0), 0.0);
 
         rowCount++;
       }
