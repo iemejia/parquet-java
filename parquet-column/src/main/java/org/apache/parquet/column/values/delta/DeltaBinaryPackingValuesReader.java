@@ -148,16 +148,17 @@ public class DeltaBinaryPackingValuesReader extends ValuesReader {
    * @param packer the packer created from bitwidth of current mini block
    */
   private void unpackMiniBlock(BytePackerForLong packer) throws IOException {
-    for (int j = 0; j < config.miniBlockSizeInValues; j += 8) {
-      unpack8Values(packer);
+    int bitWidth = packer.getBitWidth();
+    int valueCount = config.miniBlockSizeInValues;
+    ByteBuffer buffer = in.slice((valueCount / 8) * bitWidth);
+    int bufferPosition = buffer.position();
+    for (int j = 0, byteOffset = 0; j < valueCount; j += 8, byteOffset += bitWidth) {
+      unpack8Values(packer, buffer, bufferPosition + byteOffset);
     }
   }
 
-  private void unpack8Values(BytePackerForLong packer) throws IOException {
-    // get a single buffer of 8 values. most of the time, this won't require a copy
-    // TODO: update the packer to consume from an InputStream
-    ByteBuffer buffer = in.slice(packer.getBitWidth());
-    packer.unpack8Values(buffer, buffer.position(), valuesBuffer, valuesBuffered);
+  private void unpack8Values(BytePackerForLong packer, ByteBuffer buffer, int bufferPosition) {
+    packer.unpack8Values(buffer, bufferPosition, valuesBuffer, valuesBuffered);
     this.valuesBuffered += 8;
   }
 
