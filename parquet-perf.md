@@ -549,6 +549,70 @@ delta-int benchmark.
 
 ---
 
+## Round 4: Binary Dictionary Encoding Optimization
+
+### Improvement 8: Binary — Cache `hashCode()` for Constant Instances
+
+#### File Changed
+
+`parquet-column/src/main/java/org/apache/parquet/io/api/Binary.java`
+
+#### Problem
+
+`BinaryEncodingBenchmark.encodeDictionary` spends much of its time in dictionary map lookups.
+For binary dictionary writers, the hot path is:
+
+```java
+int id = binaryDictionaryContent.getInt(v);
+```
+
+The benchmark data is generated using `Binary.fromConstantByteArray(...)`, which means the
+same immutable `Binary` instances are reused repeatedly in the low-cardinality cases.
+
+However, all `Binary` implementations recomputed `hashCode()` from scratch on every map lookup.
+For `ByteArrayBackedBinary`, that meant scanning the entire byte array each time. For long strings,
+this dominated encodeDictionary throughput.
+
+#### Fix
+
+Added a transient cached hash code to the `Binary` base class and reused it only for
+constant (non-reused) instances:
+
+```java
+private transient int cachedHashCode;
+private transient boolean hashCodeCached;
+```
+
+Each concrete `hashCode()` implementation now does:
+
+```java
+if (isHashCodeCached()) {
+    return getCachedHashCode();
+}
+return cacheHashCode(computedHashCode);
+```
+
+The cache is only populated when `isBackingBytesReused == false` so behavior remains correct for
+reused/mutable backing data. This preserves existing semantics while making repeated dictionary
+lookups for constant values effectively O(1) after the first hash.
+
+#### Benchmark Results
+
+| Benchmark | Cardinality | StringLength | Before | After | Change |
+|-----------|------------|-------------|--------|-------|--------|
+| `encodeDictionary` | LOW | 10 | 13,027,210 | 18,702,494 | **+43.6%** |
+| `encodeDictionary` | LOW | 100 | 2,964,740 | 17,298,359 | **+483%** |
+| `encodeDictionary` | LOW | 1000 | 295,378 | 19,141,624 | **+6381%** |
+| `encodeDictionary` | HIGH | 10 | 826,892 | 1,023,924 | **+23.8%** |
+| `encodeDictionary` | HIGH | 100 | 392,497 | 1,161,194 | **+196%** |
+| `encodeDictionary` | HIGH | 1000 | 71,879 | 1,195,914 | **+1564%** |
+
+The largest gains occur for long strings and dictionary encode in general, where repeated hashing
+cost dominated the entire benchmark. This optimization improves all constant `Binary` map lookup
+scenarios, not just dictionary encoding.
+
+---
+
 ## Updated Summary of All Results
 
 | # | Optimization | Module | Benchmark | Improvement |
@@ -560,6 +624,7 @@ delta-int benchmark.
 | 5 | DeltaBA writer: avoid array copy | parquet-column | encodeDeltaByteArray | **+21.6%** |
 | 6 | Delta reader: one slice per miniblock | parquet-column | decodeDelta | **+14%** |
 | 7 | Delta writers: use pack32Values | parquet-column | encodeDelta | **+3.7%** |
+| 8 | Binary: cache hashCode for constants | parquet-column | encodeDictionary | **+43.6% to +6381%** |
 
 ### Test Results
 
@@ -577,6 +642,10 @@ delta-int benchmark.
 2. `parquet-column/src/main/java/org/apache/parquet/column/values/delta/DeltaBinaryPackingValuesWriterForInteger.java`
 3. `parquet-column/src/main/java/org/apache/parquet/column/values/delta/DeltaBinaryPackingValuesWriterForLong.java`
 
+### Files Modified (Round 4)
+
+1. `parquet-column/src/main/java/org/apache/parquet/io/api/Binary.java`
+
 ### Commits
 
 ```
@@ -584,4 +653,5 @@ delta-int benchmark.
 b9a2bc794 Optimize plain int encoding and delta byte array writing
 dfcab6420 Reduce delta decode ByteBuffer slicing overhead
 4cc922e5d Use 32-value packer entry points in delta writers
+0baf1e664 Cache hash codes for constant Binary values
 ```
