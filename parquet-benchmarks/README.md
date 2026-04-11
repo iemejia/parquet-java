@@ -26,7 +26,7 @@ First, building the `parquet-benchmarks` module creates an uber-jar including th
 classes and all dependencies, and a main class to launch the JMH tool.
 
 ```
-./mvnw --projects parquet-benchmarks -amd -DskipTests -Denforcer.skip=true clean package
+./mvnw --projects parquet-benchmarks -am -DskipTests -Denforcer.skip=true clean package
 ```
 
 JMH doesn't have the notion of "benchmark suites", but there are certain benchmarks that
@@ -56,3 +56,25 @@ make sense to group together or to run in isolation during development.  The
 ./parquet-benchmarks/run.sh clean
 ```
 
+## Benchmark Suites
+
+| Suite        | Class(es)                                        | Description |
+|--------------|--------------------------------------------------|-------------|
+| `write`      | `WriteBenchmarks`                                | File-level write with real filesystem I/O. Parameterized across codec (UNCOMPRESSED, SNAPPY, GZIP, ZSTD) and writer version (V1, V2). |
+| `read`       | `ReadBenchmarks`                                 | File-level read with real filesystem I/O. Parameterized across codec and writer version. |
+| `filewrite`  | `FileWriteBenchmark`                             | CPU-only write to a BlackHole sink (no I/O). Parameterized across codec, writer version, and dictionary encoding. |
+| `fileread`   | `FileReadBenchmark`                              | File-level read from temp files. Parameterized across codec and writer version. |
+| `encoding`   | `IntEncodingBenchmark`, `BinaryEncodingBenchmark`| Encoding-level micro-benchmarks for INT32 and BINARY values. Tests PLAIN, DELTA, BYTE_STREAM_SPLIT, and DICTIONARY encodings across data patterns. |
+| `concurrent` | `ConcurrentReadWriteBenchmark`                   | Multi-threaded (4 threads) concurrent read/write benchmarks. |
+| `checksum`   | `PageChecksumWriteBenchmarks`, `PageChecksumReadBenchmarks` | Reading and writing with and without CRC page checksums. |
+| `filter`     | `FilteringBenchmarks`                            | Column-index filtering benchmarks. |
+| `nested`     | `NestedNullWritingBenchmarks`                    | Writing deeply nested schemas with high null ratios. |
+
+## Tests
+
+A JUnit correctness test (`ConcurrentCorrectnessTest`) validates that concurrent
+write-then-read operations preserve data integrity. Run it with:
+
+```
+./mvnw --projects parquet-benchmarks test
+```

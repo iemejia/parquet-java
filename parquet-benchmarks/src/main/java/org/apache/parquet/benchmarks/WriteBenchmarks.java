@@ -18,156 +18,89 @@
  */
 package org.apache.parquet.benchmarks;
 
-import static org.apache.parquet.benchmarks.BenchmarkConstants.BLOCK_SIZE_256M;
-import static org.apache.parquet.benchmarks.BenchmarkConstants.BLOCK_SIZE_512M;
-import static org.apache.parquet.benchmarks.BenchmarkConstants.BLOCK_SIZE_DEFAULT;
-import static org.apache.parquet.benchmarks.BenchmarkConstants.FIXED_LEN_BYTEARRAY_SIZE;
-import static org.apache.parquet.benchmarks.BenchmarkConstants.ONE_MILLION;
-import static org.apache.parquet.benchmarks.BenchmarkConstants.PAGE_SIZE_4M;
-import static org.apache.parquet.benchmarks.BenchmarkConstants.PAGE_SIZE_8M;
-import static org.apache.parquet.benchmarks.BenchmarkConstants.PAGE_SIZE_DEFAULT;
-import static org.apache.parquet.benchmarks.BenchmarkFiles.configuration;
-import static org.apache.parquet.benchmarks.BenchmarkFiles.file_1M;
-import static org.apache.parquet.benchmarks.BenchmarkFiles.file_1M_BS256M_PS4M;
-import static org.apache.parquet.benchmarks.BenchmarkFiles.file_1M_BS256M_PS8M;
-import static org.apache.parquet.benchmarks.BenchmarkFiles.file_1M_BS512M_PS4M;
-import static org.apache.parquet.benchmarks.BenchmarkFiles.file_1M_BS512M_PS8M;
-import static org.apache.parquet.benchmarks.BenchmarkFiles.file_1M_GZIP;
-import static org.apache.parquet.benchmarks.BenchmarkFiles.file_1M_SNAPPY;
-import static org.apache.parquet.column.ParquetProperties.WriterVersion.PARQUET_2_0;
-import static org.apache.parquet.hadoop.metadata.CompressionCodecName.GZIP;
-import static org.apache.parquet.hadoop.metadata.CompressionCodecName.SNAPPY;
-import static org.apache.parquet.hadoop.metadata.CompressionCodecName.UNCOMPRESSED;
-import static org.openjdk.jmh.annotations.Scope.Thread;
-
+import java.io.File;
 import java.io.IOException;
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
+import org.apache.parquet.column.ParquetProperties.WriterVersion;
+import org.apache.parquet.example.data.Group;
+import org.apache.parquet.example.data.simple.SimpleGroupFactory;
+import org.apache.parquet.hadoop.ParquetFileWriter;
+import org.apache.parquet.hadoop.ParquetWriter;
+import org.apache.parquet.hadoop.example.ExampleParquetWriter;
+import org.apache.parquet.hadoop.metadata.CompressionCodecName;
+import org.apache.parquet.io.LocalOutputFile;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
 import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.TearDown;
+import org.openjdk.jmh.annotations.Warmup;
 
-@State(Thread)
+/**
+ * File-level write benchmarks measuring throughput of the full Parquet write pipeline
+ * including filesystem I/O. Uses {@link LocalOutputFile} for Hadoop-free file access.
+ *
+ * <p>Parameterized across compression codec and writer version. For CPU-only write
+ * benchmarks (no filesystem I/O), see {@link FileWriteBenchmark}.
+ */
+@BenchmarkMode({Mode.SingleShotTime, Mode.AverageTime})
+@Fork(1)
+@Warmup(iterations = 3, batchSize = 1)
+@Measurement(iterations = 5, batchSize = 1)
+@OutputTimeUnit(TimeUnit.MILLISECONDS)
+@State(Scope.Thread)
 public class WriteBenchmarks {
-  private DataGenerator dataGenerator = new DataGenerator();
+
+  @Param({"UNCOMPRESSED", "SNAPPY", "GZIP", "ZSTD"})
+  public String codec;
+
+  @Param({"PARQUET_1_0", "PARQUET_2_0"})
+  public String writerVersion;
+
+  private File tempFile;
 
   @Setup(Level.Iteration)
   public void setup() {
-    // clean existing test data at the beginning of each iteration
-    dataGenerator.cleanup();
+    // Clean up any leftover file from previous iteration
+    if (tempFile != null && tempFile.exists()) {
+      tempFile.delete();
+    }
+  }
+
+  @TearDown(Level.Trial)
+  public void tearDown() {
+    if (tempFile != null && tempFile.exists()) {
+      tempFile.delete();
+    }
   }
 
   @Benchmark
-  @BenchmarkMode(Mode.SingleShotTime)
-  public void write1MRowsDefaultBlockAndPageSizeUncompressed() throws IOException {
-    dataGenerator.generateData(
-        file_1M,
-        configuration,
-        PARQUET_2_0,
-        BLOCK_SIZE_DEFAULT,
-        PAGE_SIZE_DEFAULT,
-        FIXED_LEN_BYTEARRAY_SIZE,
-        UNCOMPRESSED,
-        ONE_MILLION);
-  }
+  public void writeFile() throws IOException {
+    tempFile = File.createTempFile("parquet-write-bench-", ".parquet");
+    tempFile.deleteOnExit();
+    tempFile.delete(); // remove so the writer can create it
 
-  @Benchmark
-  @BenchmarkMode(Mode.SingleShotTime)
-  public void write1MRowsBS256MPS4MUncompressed() throws IOException {
-    dataGenerator.generateData(
-        file_1M_BS256M_PS4M,
-        configuration,
-        PARQUET_2_0,
-        BLOCK_SIZE_256M,
-        PAGE_SIZE_4M,
-        FIXED_LEN_BYTEARRAY_SIZE,
-        UNCOMPRESSED,
-        ONE_MILLION);
-  }
-
-  @Benchmark
-  @BenchmarkMode(Mode.SingleShotTime)
-  public void write1MRowsBS256MPS8MUncompressed() throws IOException {
-    dataGenerator.generateData(
-        file_1M_BS256M_PS8M,
-        configuration,
-        PARQUET_2_0,
-        BLOCK_SIZE_256M,
-        PAGE_SIZE_8M,
-        FIXED_LEN_BYTEARRAY_SIZE,
-        UNCOMPRESSED,
-        ONE_MILLION);
-  }
-
-  @Benchmark
-  @BenchmarkMode(Mode.SingleShotTime)
-  public void write1MRowsBS512MPS4MUncompressed() throws IOException {
-    dataGenerator.generateData(
-        file_1M_BS512M_PS4M,
-        configuration,
-        PARQUET_2_0,
-        BLOCK_SIZE_512M,
-        PAGE_SIZE_4M,
-        FIXED_LEN_BYTEARRAY_SIZE,
-        UNCOMPRESSED,
-        ONE_MILLION);
-  }
-
-  @Benchmark
-  @BenchmarkMode(Mode.SingleShotTime)
-  public void write1MRowsBS512MPS8MUncompressed() throws IOException {
-    dataGenerator.generateData(
-        file_1M_BS512M_PS8M,
-        configuration,
-        PARQUET_2_0,
-        BLOCK_SIZE_512M,
-        PAGE_SIZE_8M,
-        FIXED_LEN_BYTEARRAY_SIZE,
-        UNCOMPRESSED,
-        ONE_MILLION);
-  }
-
-  // TODO how to handle lzo jar?
-  //  @Benchmark
-  //  public void write1MRowsDefaultBlockAndPageSizeLZO()
-  //          throws IOException
-  //  {
-  //    dataGenerator.generateData(parquetFile_1M_LZO,
-  //            configuration,
-  //            WriterVersion.PARQUET_2_0,
-  //            BLOCK_SIZE_DEFAULT,
-  //            PAGE_SIZE_DEFAULT,
-  //            FIXED_LEN_BYTEARRAY_SIZE,
-  //            LZO,
-  //            ONE_MILLION);
-  //  }
-
-  @Benchmark
-  @BenchmarkMode(Mode.SingleShotTime)
-  public void write1MRowsDefaultBlockAndPageSizeSNAPPY() throws IOException {
-    dataGenerator.generateData(
-        file_1M_SNAPPY,
-        configuration,
-        PARQUET_2_0,
-        BLOCK_SIZE_DEFAULT,
-        PAGE_SIZE_DEFAULT,
-        FIXED_LEN_BYTEARRAY_SIZE,
-        SNAPPY,
-        ONE_MILLION);
-  }
-
-  @Benchmark
-  @BenchmarkMode(Mode.SingleShotTime)
-  public void write1MRowsDefaultBlockAndPageSizeGZIP() throws IOException {
-    dataGenerator.generateData(
-        file_1M_GZIP,
-        configuration,
-        PARQUET_2_0,
-        BLOCK_SIZE_DEFAULT,
-        PAGE_SIZE_DEFAULT,
-        FIXED_LEN_BYTEARRAY_SIZE,
-        GZIP,
-        ONE_MILLION);
+    SimpleGroupFactory factory = TestDataFactory.newGroupFactory();
+    Random random = new Random(42);
+    try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(
+            new LocalOutputFile(tempFile.toPath()))
+        .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+        .withType(TestDataFactory.FILE_BENCHMARK_SCHEMA)
+        .withCompressionCodec(CompressionCodecName.valueOf(codec))
+        .withWriterVersion(WriterVersion.valueOf(writerVersion))
+        .withDictionaryEncoding(true)
+        .build()) {
+      for (int i = 0; i < TestDataFactory.DEFAULT_ROW_COUNT; i++) {
+        writer.write(TestDataFactory.generateRow(factory, i, random));
+      }
+    }
   }
 }

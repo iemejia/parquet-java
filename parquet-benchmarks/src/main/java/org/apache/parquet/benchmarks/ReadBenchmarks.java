@@ -18,107 +18,104 @@
  */
 package org.apache.parquet.benchmarks;
 
-import static org.apache.parquet.benchmarks.BenchmarkConstants.ONE_MILLION;
-import static org.apache.parquet.benchmarks.BenchmarkFiles.configuration;
-import static org.apache.parquet.benchmarks.BenchmarkFiles.file_1M;
-import static org.apache.parquet.benchmarks.BenchmarkFiles.file_1M_BS256M_PS4M;
-import static org.apache.parquet.benchmarks.BenchmarkFiles.file_1M_BS256M_PS8M;
-import static org.apache.parquet.benchmarks.BenchmarkFiles.file_1M_BS512M_PS4M;
-import static org.apache.parquet.benchmarks.BenchmarkFiles.file_1M_BS512M_PS8M;
-import static org.apache.parquet.benchmarks.BenchmarkFiles.file_1M_GZIP;
-import static org.apache.parquet.benchmarks.BenchmarkFiles.file_1M_SNAPPY;
-
+import java.io.File;
 import java.io.IOException;
-import org.apache.hadoop.fs.Path;
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
+import org.apache.parquet.column.ParquetProperties.WriterVersion;
 import org.apache.parquet.example.data.Group;
+import org.apache.parquet.example.data.simple.SimpleGroupFactory;
+import org.apache.parquet.hadoop.ParquetFileWriter;
 import org.apache.parquet.hadoop.ParquetReader;
+import org.apache.parquet.hadoop.ParquetWriter;
+import org.apache.parquet.hadoop.api.ReadSupport;
+import org.apache.parquet.hadoop.example.ExampleParquetWriter;
 import org.apache.parquet.hadoop.example.GroupReadSupport;
+import org.apache.parquet.hadoop.metadata.CompressionCodecName;
+import org.apache.parquet.io.InputFile;
+import org.apache.parquet.io.LocalInputFile;
+import org.apache.parquet.io.LocalOutputFile;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
 import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.TearDown;
+import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
+/**
+ * File-level read benchmarks measuring throughput of the full Parquet read pipeline
+ * including filesystem I/O. Uses {@link LocalInputFile} for Hadoop-free file access.
+ *
+ * <p>A temporary file is generated during setup, then read repeatedly during the benchmark.
+ * Parameterized across compression codec and writer version. For CPU-only read benchmarks
+ * (minimal I/O via temp files), see {@link FileReadBenchmark}.
+ */
+@BenchmarkMode({Mode.SingleShotTime, Mode.AverageTime})
+@Fork(1)
+@Warmup(iterations = 3, batchSize = 1)
+@Measurement(iterations = 5, batchSize = 1)
+@OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Benchmark)
 public class ReadBenchmarks {
 
-  private void read(Path parquetFile, int nRows, Blackhole blackhole) throws IOException {
-    ParquetReader<Group> reader = ParquetReader.builder(new GroupReadSupport(), parquetFile)
-        .withConf(configuration)
-        .build();
-    for (int i = 0; i < nRows; i++) {
-      Group group = reader.read();
-      blackhole.consume(group.getBinary("binary_field", 0));
-      blackhole.consume(group.getInteger("int32_field", 0));
-      blackhole.consume(group.getLong("int64_field", 0));
-      blackhole.consume(group.getBoolean("boolean_field", 0));
-      blackhole.consume(group.getFloat("float_field", 0));
-      blackhole.consume(group.getDouble("double_field", 0));
-      blackhole.consume(group.getBinary("flba_field", 0));
-      blackhole.consume(group.getInt96("int96_field", 0));
-    }
-    reader.close();
-  }
+  @Param({"UNCOMPRESSED", "SNAPPY", "GZIP", "ZSTD"})
+  public String codec;
 
-  /**
-   * This needs to be done exactly once.  To avoid needlessly regenerating the files for reading, they aren't cleaned
-   * as part of the benchmark.  If the files exist, a message will be printed and they will not be regenerated.
-   */
+  @Param({"PARQUET_1_0", "PARQUET_2_0"})
+  public String writerVersion;
+
+  private File tempFile;
+
   @Setup(Level.Trial)
-  public void generateFilesForRead() {
-    new DataGenerator().generateAll();
+  public void setup() throws IOException {
+    tempFile = File.createTempFile("parquet-read-bench-", ".parquet");
+    tempFile.deleteOnExit();
+    tempFile.delete();
+
+    SimpleGroupFactory factory = TestDataFactory.newGroupFactory();
+    Random random = new Random(42);
+    try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(
+            new LocalOutputFile(tempFile.toPath()))
+        .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+        .withType(TestDataFactory.FILE_BENCHMARK_SCHEMA)
+        .withCompressionCodec(CompressionCodecName.valueOf(codec))
+        .withWriterVersion(WriterVersion.valueOf(writerVersion))
+        .withDictionaryEncoding(true)
+        .build()) {
+      for (int i = 0; i < TestDataFactory.DEFAULT_ROW_COUNT; i++) {
+        writer.write(TestDataFactory.generateRow(factory, i, random));
+      }
+    }
+  }
+
+  @TearDown(Level.Trial)
+  public void tearDown() {
+    if (tempFile != null && tempFile.exists()) {
+      tempFile.delete();
+    }
   }
 
   @Benchmark
-  @BenchmarkMode(Mode.SingleShotTime)
-  public void read1MRowsDefaultBlockAndPageSizeUncompressed(Blackhole blackhole) throws IOException {
-    read(file_1M, ONE_MILLION, blackhole);
-  }
-
-  @Benchmark
-  @BenchmarkMode(Mode.SingleShotTime)
-  public void read1MRowsBS256MPS4MUncompressed(Blackhole blackhole) throws IOException {
-    read(file_1M_BS256M_PS4M, ONE_MILLION, blackhole);
-  }
-
-  @Benchmark
-  @BenchmarkMode(Mode.SingleShotTime)
-  public void read1MRowsBS256MPS8MUncompressed(Blackhole blackhole) throws IOException {
-    read(file_1M_BS256M_PS8M, ONE_MILLION, blackhole);
-  }
-
-  @Benchmark
-  @BenchmarkMode(Mode.SingleShotTime)
-  public void read1MRowsBS512MPS4MUncompressed(Blackhole blackhole) throws IOException {
-    read(file_1M_BS512M_PS4M, ONE_MILLION, blackhole);
-  }
-
-  @Benchmark
-  @BenchmarkMode(Mode.SingleShotTime)
-  public void read1MRowsBS512MPS8MUncompressed(Blackhole blackhole) throws IOException {
-    read(file_1M_BS512M_PS8M, ONE_MILLION, blackhole);
-  }
-
-  // TODO how to handle lzo jar?
-  //  @Benchmark
-  //  public void read1MRowsDefaultBlockAndPageSizeLZO(Blackhole blackhole)
-  //          throws IOException
-  //  {
-  //    read(parquetFile_1M_LZO, ONE_MILLION, blackhole);
-  //  }
-
-  @Benchmark
-  @BenchmarkMode(Mode.SingleShotTime)
-  public void read1MRowsDefaultBlockAndPageSizeSNAPPY(Blackhole blackhole) throws IOException {
-    read(file_1M_SNAPPY, ONE_MILLION, blackhole);
-  }
-
-  @Benchmark
-  @BenchmarkMode(Mode.SingleShotTime)
-  public void read1MRowsDefaultBlockAndPageSizeGZIP(Blackhole blackhole) throws IOException {
-    read(file_1M_GZIP, ONE_MILLION, blackhole);
+  public void readFile(Blackhole bh) throws IOException {
+    InputFile inputFile = new LocalInputFile(tempFile.toPath());
+    try (ParquetReader<Group> reader = new ParquetReader.Builder<Group>(inputFile) {
+      @Override
+      protected ReadSupport<Group> getReadSupport() {
+        return new GroupReadSupport();
+      }
+    }.build()) {
+      Group group;
+      while ((group = reader.read()) != null) {
+        bh.consume(group);
+      }
+    }
   }
 }
