@@ -23,22 +23,29 @@ import static org.junit.Assert.assertArrayEquals;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.function.IntPredicate;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.junit.Assume;
 import org.junit.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class TestByteBitPacking512VectorLE {
-  private static final Logger LOG = LoggerFactory.getLogger(TestByteBitPacking512VectorLE.class);
-
   @Test
   public void unpackValuesUsingVector() {
     Assume.assumeTrue(ParquetReadRouter.getSupportVectorFromCPUFlags() == VectorSupport.VECTOR_512);
     for (int i = 1; i <= 32; i++) {
       unpackValuesUsingVectorBitWidth(i);
     }
+  }
+
+  @Test
+  public void unpackValuesUsingVectorExactSizeArray() {
+    assertExactSizeVectorRoundTrip(this::vectorCallIsExactSizeSafe, this::unpackSingleVectorArray);
+  }
+
+  @Test
+  public void unpackValuesUsingVectorExactSizeByteBuffer() {
+    assertExactSizeVectorRoundTrip(this::vectorCallIsExactSizeSafe, this::unpackSingleVectorByteBuffer);
   }
 
   private void unpackValuesUsingVectorBitWidth(int bitWidth) {
@@ -119,6 +126,55 @@ public class TestByteBitPacking512VectorLE {
     for (; byteIndex < totalByteCount; byteIndex += bitWidth, valueIndex += 8) {
       bytePacker.unpack8Values(input, byteIndex, output, valueIndex);
     }
+  }
+
+  private void unpackSingleVectorArray(int bitWidth, byte[] input, int[] output) {
+    Packer.LITTLE_ENDIAN.newBytePackerVector(bitWidth).unpackValuesUsingVector(input, 0, output, 0);
+  }
+
+  private void unpackSingleVectorByteBuffer(int bitWidth, byte[] input, int[] output) {
+    Packer.LITTLE_ENDIAN.newBytePackerVector(bitWidth).unpackValuesUsingVector(ByteBuffer.wrap(input), 0, output, 0);
+  }
+
+  private void assertExactSizeVectorRoundTrip(IntPredicate supportedBitWidth, VectorUnpacker unpacker) {
+    for (int bitWidth = 1; bitWidth <= 32; bitWidth++) {
+      if (!supportedBitWidth.test(bitWidth)) {
+        continue;
+      }
+
+      BytePacker scalarPacker = Packer.LITTLE_ENDIAN.newBytePacker(bitWidth);
+      BytePacker vectorPacker = Packer.LITTLE_ENDIAN.newBytePackerVector(bitWidth);
+      int unpackCount = vectorPacker.getUnpackCount();
+      int byteCount = unpackCount / 8 * bitWidth;
+      int[] input = getSequentialValues(unpackCount, bitWidth);
+      byte[] packed = new byte[byteCount];
+      int[] output = new int[unpackCount];
+
+      for (int i = 0; i < unpackCount / 8; i++) {
+        scalarPacker.pack8Values(input, i * 8, packed, i * bitWidth);
+      }
+
+      unpacker.unpack(bitWidth, packed, output);
+      assertArrayEquals("bitWidth=" + bitWidth, input, output);
+    }
+  }
+
+  private boolean vectorCallIsExactSizeSafe(int bitWidth) {
+    return bitWidth != 1 && bitWidth != 2;
+  }
+
+  private int[] getSequentialValues(int length, int bitWidth) {
+    int maxValue = bitWidth == 32 ? Integer.MAX_VALUE : (1 << bitWidth) - 1;
+    int[] values = new int[length];
+    for (int i = 0; i < length; i++) {
+      values[i] = Math.min(i, maxValue);
+    }
+    return values;
+  }
+
+  @FunctionalInterface
+  private interface VectorUnpacker {
+    void unpack(int bitWidth, byte[] input, int[] output);
   }
 
   private Stream<int[]> getRangeData(int bitWidth) {
