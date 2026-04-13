@@ -26,6 +26,8 @@ import it.unimi.dsi.fastutil.doubles.DoubleIterator;
 import it.unimi.dsi.fastutil.floats.Float2IntLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.floats.Float2IntMap;
 import it.unimi.dsi.fastutil.floats.FloatIterator;
+import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.Int2IntLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.ints.Int2IntMap;
 import it.unimi.dsi.fastutil.longs.Long2IntLinkedOpenHashMap;
@@ -488,7 +490,8 @@ public abstract class DictionaryValuesWriter extends ValuesWriter implements Req
   public static class PlainIntegerDictionaryValuesWriter extends DictionaryValuesWriter {
 
     /* type specific dictionary content */
-    private Int2IntMap intDictionaryContent = new Int2IntLinkedOpenHashMap();
+    private Int2IntMap intDictionaryContent = new Int2IntOpenHashMap();
+    private IntArrayList dictionaryValues = new IntArrayList();
 
     public PlainIntegerDictionaryValuesWriter(
         int maxDictionaryByteSize,
@@ -503,8 +506,9 @@ public abstract class DictionaryValuesWriter extends ValuesWriter implements Req
     public void writeInteger(int v) {
       int id = intDictionaryContent.get(v);
       if (id == -1) {
-        id = intDictionaryContent.size();
+        id = dictionaryValues.size();
         intDictionaryContent.put(v, id);
+        dictionaryValues.add(v);
         dictionaryByteSize += 4;
       }
       encodedValues.add(id);
@@ -516,11 +520,9 @@ public abstract class DictionaryValuesWriter extends ValuesWriter implements Req
         // return a dictionary only if we actually used it
         PlainValuesWriter dictionaryEncoder =
             new PlainValuesWriter(lastUsedDictionaryByteSize, maxDictionaryByteSize, allocator);
-        it.unimi.dsi.fastutil.ints.IntIterator intIterator =
-            intDictionaryContent.keySet().iterator();
         // write only the part of the dict that we used
         for (int i = 0; i < lastUsedDictionarySize; i++) {
-          dictionaryEncoder.writeInteger(intIterator.nextInt());
+          dictionaryEncoder.writeInteger(dictionaryValues.getInt(i));
         }
         return dictPage(dictionaryEncoder);
       }
@@ -535,24 +537,16 @@ public abstract class DictionaryValuesWriter extends ValuesWriter implements Req
     @Override
     protected void clearDictionaryContent() {
       intDictionaryContent.clear();
+      dictionaryValues.clear();
     }
 
     @Override
     public void fallBackDictionaryEncodedData(ValuesWriter writer) {
-      // build reverse dictionary
-      int[] reverseDictionary = new int[getDictionarySize()];
-      ObjectIterator<Int2IntMap.Entry> entryIterator =
-          intDictionaryContent.int2IntEntrySet().iterator();
-      while (entryIterator.hasNext()) {
-        Int2IntMap.Entry entry = entryIterator.next();
-        reverseDictionary[entry.getIntValue()] = entry.getIntKey();
-      }
-
       // fall back to plain encoding
       IntIterator iterator = encodedValues.iterator();
       while (iterator.hasNext()) {
         int id = iterator.next();
-        writer.writeInteger(reverseDictionary[id]);
+        writer.writeInteger(dictionaryValues.getInt(id));
       }
     }
   }
