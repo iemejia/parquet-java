@@ -1903,3 +1903,75 @@ dfcab6420 Reduce delta decode ByteBuffer slicing overhead
 b9a2bc794 Optimize plain int encoding and delta byte array writing
 136c751f1 Optimize encoding hot paths: ByteStreamSplit writer/reader and RLE decoder
 ```
+
+---
+
+## Future Optimization Targets
+
+The following targets have been identified but not pursued. They are listed here for
+reference in case future work resumes.
+
+### High Impact, High Effort
+
+#### Level B Batch ColumnReader
+
+The single largest remaining opportunity. The `RecordReaderImplementation.read()` state
+machine performs 5-6 virtual dispatches per value: def level read, rep level read,
+`binding.read()`, `binding.writeValue()`, FSA state transition, and group converter
+start/end calls. For flat schemas (no nesting, repetition level always 0), a specialized
+batch reader could process N rows at a time:
+
+1. Batch-read definition levels via `RunLengthBitPackingHybridDecoder.readInts()`
+2. Batch-read values via `ValuesReader.readIntegers()` (already implemented in Round 17)
+3. Batch-write to converters or directly to output arrays
+4. Skip the FSA state machine entirely for flat schemas
+
+**Files involved:**
+- `parquet-column/src/main/java/org/apache/parquet/io/RecordReaderImplementation.java` (lines 408-445)
+- `parquet-column/src/main/java/org/apache/parquet/column/impl/ColumnReaderBase.java`
+- `parquet-column/src/main/java/org/apache/parquet/column/ColumnReader.java` (interface)
+- New: `BatchColumnReader` or similar
+
+**Estimated impact:** Could reduce end-to-end read time significantly (the state machine
+overhead dominates the 94ms UNCOMPRESSED read for 600K values = 157ns/value, of which
+only ~10-15ns is actual decode).
+
+**Complexity:** Requires new API surface, flat-schema detection, integration with the
+converter framework, and careful handling of nulls (definition levels < max).
+
+### Low Impact, Low Effort
+
+#### DeltaByteArrayWriter `v.copy().getBytesUnsafe()` Avoidable Copy
+
+**File:** `parquet-column/src/main/java/org/apache/parquet/column/values/deltastrings/DeltaByteArrayWriter.java` (lines 90-95)
+
+For `ByteArraySliceBackedBinary` and `ByteBufferBackedBinary`, `v.copy().getBytesUnsafe()`
+creates a copy because the backing storage is larger than the slice. A no-copy approach
+would require rewriting the prefix comparison loop to work with offset+length or
+ByteBuffer-based comparison, adding significant complexity for marginal gain.
+
+The copy is structurally required for 2 of 3 Binary implementations. For
+`ByteArrayBackedBinary` (the most common case from `Binary.fromConstantByteArray()`),
+`copy()` returns `this` and `getBytesUnsafe()` returns the backing array directly — no copy.
+
+#### BloomFilter.merge() toByteArray Copy
+
+**File:** `parquet-column/src/main/java/org/apache/parquet/column/values/bloomfilter/BlockSplitBloomFilter.java` (lines 418-423)
+
+`merge()` serializes the other bloom filter to a `ByteArrayOutputStream`, then calls
+`toByteArray()` (which copies), then OR's the bytes into `bitset[]`. Could be eliminated
+by providing direct access to the other filter's `bitset` array. Cold path — bloom filter
+merging is not per-value.
+
+### Exhausted Areas (No Further Gains)
+
+- **LittleEndianDataOutputStream** — Zero remaining usages in codebase
+- **LinkedOpenHashMap** — All replaced with OpenHashMap + ArrayList
+- **InputStream-based decode** — All converted to ByteBuffer
+- **RLE decoder per-value path** — 3 separate attempts confirmed not I/O-bound
+- **Plain encode/decode** — Fully optimized (direct ByteBuffer intrinsics)
+- **ByteStreamSplit encode** — 2.35x via batch scatter
+- **ByteStreamSplit decode** — 2x via array-based single-pass transpose
+- **Page-level copy elimination** — Done (BAOSBytesInput + streaming CRC)
+- **Dictionary writers** — All use OpenHashMap + ArrayList
+- **Batch ValuesReader APIs** — Done (RLE +148%, Dictionary +67%)
