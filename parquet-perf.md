@@ -1737,16 +1737,79 @@ is just `decodedDataBuffer.getInt(offset)`, which is unchanged.
 
 1. `parquet-column/src/main/java/org/apache/parquet/column/values/bytestreamsplit/ByteStreamSplitValuesReader.java`
 
+## End-to-End Benchmark Comparison
+
+Baseline: commit `375ffec30` (pre-optimization, benchmark module merged).
+Optimized: commit `916a632ea` (all 24 optimizations applied, `perf` branch HEAD).
+
+Benchmark workload: 6-column schema (int32, int64, float, double, boolean, binary),
+100,000 rows, dictionary encoding enabled, real filesystem I/O (LocalInputFile).
+JMH: 4 warmup iterations, 5 measurement iterations, 1 fork, avgt mode.
+
+### Read Path (ReadBenchmarks.readFile)
+
+| Configuration | Baseline (ms) | Optimized (ms) | Δ ms | Improvement |
+|---|---|---|---|---|
+| UNCOMPRESSED, V1 | 104.4 ± 1.7 | 94.3 ± 2.6 | −10.1 | **−9.7%** |
+| UNCOMPRESSED, V2 | 87.8 ± 2.9 | 82.0 ± 2.5 | −5.9 | **−6.7%** |
+| SNAPPY, V1 | 123.3 ± 5.4 | 112.0 ± 2.1 | −11.3 | **−9.2%** |
+| SNAPPY, V2 | 101.9 ± 4.2 | 94.4 ± 1.5 | −7.5 | **−7.4%** |
+| GZIP, V1 | 141.8 ± 4.7 | 132.1 ± 2.1 | −9.6 | **−6.8%** |
+| GZIP, V2 | 115.5 ± 1.8 | 110.3 ± 4.1 | −5.2 | **−4.5%** |
+| ZSTD, V1 | 124.9 ± 2.8 | 113.9 ± 1.5 | −11.0 | **−8.8%** |
+| ZSTD, V2 | 102.3 ± 2.9 | 96.2 ± 3.8 | −6.1 | **−5.9%** |
+
+### Write Path (WriteBenchmarks.writeFile)
+
+| Configuration | Baseline (ms) | Optimized (ms) | Δ ms | Improvement |
+|---|---|---|---|---|
+| UNCOMPRESSED, V1 | 215.8 ± 3.6 | 185.2 ± 5.5 | −30.7 | **−14.2%** |
+| UNCOMPRESSED, V2 | 200.4 ± 8.0 | 179.2 ± 3.6 | −21.3 | **−10.6%** |
+| SNAPPY, V1 | 226.1 ± 6.0 | 193.4 ± 5.5 | −32.7 | **−14.4%** |
+| SNAPPY, V2 | 213.4 ± 14.1 | 191.5 ± 4.0 | −21.9 | **−10.3%** |
+| GZIP, V1 | 596.2 ± 24.2 | 565.3 ± 9.5 | −30.9 | **−5.2%** |
+| GZIP, V2 | 350.7 ± 5.1 | 327.8 ± 7.8 | −22.9 | **−6.5%** |
+| ZSTD, V1 | 244.1 ± 11.9 | 210.6 ± 13.2 | −33.4 | **−13.7%** |
+| ZSTD, V2 | 220.8 ± 4.6 | 199.8 ± 11.7 | −21.0 | **−9.5%** |
+
+### Analysis
+
+Write path improvements are larger (10-14%) because more of the total write time is spent
+in encoding hot paths we optimized. Read path improvements (5-10%) are diluted by
+Parquet metadata parsing, page decompression, column-level dispatch, and object materialization
+that were not targets of this work. Even though individual encoding microbenchmarks showed
+2-12x speedups, these compose with unoptimized layers to produce the observed end-to-end
+improvements.
+
+GZIP shows the smallest relative improvement because compression dominates total time
+(~400ms of the ~596ms baseline is in GZIP compression), making encode/decode savings
+proportionally smaller. UNCOMPRESSED and ZSTD/SNAPPY show the largest relative gains
+because encoding/decoding is a larger fraction of total time.
+
 ### Commits
 
 ```
-136c751f1 Optimize encoding hot paths: ByteStreamSplit writer/reader and RLE decoder
-b9a2bc794 Optimize plain int encoding and delta byte array writing
-dfcab6420 Reduce delta decode ByteBuffer slicing overhead
-4cc922e5d Use 32-value packer entry points in delta writers
-0baf1e664 Cache hash codes for constant Binary values
-344c48168 Avoid hidden suffix copies in delta byte array decode
-5b9f66494 Use pack32Values in RLE hybrid encoder
-5a94ab2f4 Optimize PlainIntegerDictionaryValuesWriter by replacing LinkedOpenHashMap with OpenHashMap and an ArrayList
+916a632ea Optimize ByteStreamSplit decode: array-based single-pass transpose (2x throughput)
+2a8463623 Optimize dictionary writers: replace LinkedOpenHashMap with OpenHashMap + ArrayList (+23-42% high cardinality)
+abea051ad Optimize delta binary writers: eliminate per-value allocation and LE wrapper (+23-33%)
+baa7e0206 Eliminate unnecessary page-size copies in compressed page assembly and CRC checksums
+3c1a4454d Optimize ByteStreamSplit writer with batch scatter writes (2.35x encode speedup)
+5cb34e914 Optimize PlainValuesWriter with direct ByteBuffer slab writes (+32% to +97%)
+65090576d Optimize RLE decoder: replace InputStream with direct ByteBuffer reads
+2e1a0146d Optimize read path: direct ByteBuffer for binary decode, remove IOException from RLE readInt()
+13c930824 Optimize PlainValuesReader with direct ByteBuffer reads (12.3x decode speedup)
+a60d3a74a Correct flush optimization docs: no peak memory reduction (validated with PeakTrackingAllocator)
+c41e066dd Update parquet-perf.md with row group flush optimization results
 d463d55a2 Reduce peak memory during row group flush by eagerly releasing column buffers
+5a94ab2f4 Optimize PlainIntegerDictionaryValuesWriter by replacing LinkedOpenHashMap with OpenHashMap and an ArrayList
+fd8114fd9 Update parquet-perf.md with round 6 results
+5b9f66494 Use pack32Values in RLE hybrid encoder
+724914335 Update parquet-perf.md with delta byte array decode optimization
+344c48168 Avoid hidden suffix copies in delta byte array decode
+8480dceb4 Update parquet-perf.md with Binary dictionary optimization
+0baf1e664 Cache hash codes for constant Binary values
+4cc922e5d Use 32-value packer entry points in delta writers
+dfcab6420 Reduce delta decode ByteBuffer slicing overhead
+b9a2bc794 Optimize plain int encoding and delta byte array writing
+136c751f1 Optimize encoding hot paths: ByteStreamSplit writer/reader and RLE decoder
 ```
