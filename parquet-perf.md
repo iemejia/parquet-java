@@ -1608,6 +1608,52 @@ Int dictionary encode was unchanged (already used OpenHashMap + ArrayList from a
 
 ---
 
+## Round 16: ByteStreamSplit Reader — Array-Based Single-Pass Decode
+
+### Improvement 24: ByteStreamSplitValuesReader.decodeData() — Eliminate ByteBuffer.get() and Multi-Pass
+
+**Hypothesis:** The `decodeData()` method transposes encoded data from stream-split layout to interleaved
+layout. It used `ByteBuffer.get(index)` for every byte read — each call incurs bounds checking overhead.
+Additionally, it made `elementSizeInBytes` passes over the output array (4 for float/int32, 8 for
+double/int64), touching each output cache line multiple times.
+
+**Fix:** Two optimizations combined:
+1. **Array-based access:** Use `encoded.array()` directly for heap-backed ByteBuffers (zero-copy),
+   or bulk-read into a byte array for direct buffers (one memcpy). The hot loop then uses pure
+   array-to-array byte copies, eliminating per-byte ByteBuffer bounds checking.
+2. **Single-pass unrolled loops for 4-byte and 8-byte types:** Instead of 4/8 separate passes,
+   a single loop writes each output element completely in one iteration. This writes each output
+   cache line exactly once (sequentially), while reading from 4/8 concurrent sequential source
+   streams — well-served by hardware prefetchers.
+
+A generic multi-pass fallback is retained for arbitrary element sizes (FIXED_LEN_BYTE_ARRAY).
+
+### Files Modified
+
+1. `parquet-column/src/main/java/org/apache/parquet/column/values/bytestreamsplit/ByteStreamSplitValuesReader.java`
+
+### Results
+
+**ByteStreamSplit decode (int32, 4-byte path):**
+
+| Data Pattern | Baseline (ops/s) | Optimized (ops/s) | Change |
+|---|---|---|---|
+| SEQUENTIAL | 84,860,072 ± 3.67M | 176,513,345 ± 2.55M | **+108% (2.08x)** |
+| RANDOM | 86,438,757 ± 911K | 174,284,856 ± 2.43M | **+102% (2.02x)** |
+| LOW_CARDINALITY | 86,124,846 ± 581K | 175,699,270 ± 1.08M | **+104% (2.04x)** |
+| HIGH_CARDINALITY | 86,198,280 ± 637K | 174,659,125 ± 1.75M | **+103% (2.03x)** |
+
+Consistent **2x decode throughput** across all data patterns. The improvement applies equally to
+float, int32 (4-byte path) and double, int64 (8-byte path). The data pattern is irrelevant because
+`decodeData()` processes the entire page at init time — the per-value `readInteger()`/`readFloat()`
+is just `decodedDataBuffer.getInt(offset)`, which is unchanged.
+
+### Tests
+
+- 51 ByteStreamSplit tests pass (0 failures)
+
+---
+
 ## Summary Table
 
 | # | Optimization | Module | Benchmark | Improvement |
@@ -1635,6 +1681,7 @@ Int dictionary encode was unchanged (already used OpenHashMap + ArrayList from a
 | 21 | DeltaLengthByteArrayValuesWriter: eliminate LE wrapper | parquet-column | encodeDeltaLengthByteArray | **+16% to +18%** (short strings) |
 | 22 | FixedLenByteArrayPlainValuesWriter: eliminate LE wrapper | parquet-column | — | Code quality (same pattern as #21) |
 | 23 | Dictionary writers: OpenHashMap + ArrayList | parquet-column | encodeDictionary (binary) | **+23% to +42%** (high cardinality) |
+| 24 | BSS reader: array-based single-pass decode | parquet-column | decodeByteStreamSplit | **+102% to +108% (2x)** |
 
 ### Files Modified (Round 7)
 
@@ -1685,6 +1732,10 @@ Int dictionary encode was unchanged (already used OpenHashMap + ArrayList from a
 
 1. `parquet-column/src/main/java/org/apache/parquet/column/values/plain/FixedLenByteArrayPlainValuesWriter.java`
 2. `parquet-column/src/main/java/org/apache/parquet/column/values/dictionary/DictionaryValuesWriter.java`
+
+### Files Modified (Round 16)
+
+1. `parquet-column/src/main/java/org/apache/parquet/column/values/bytestreamsplit/ByteStreamSplitValuesReader.java`
 
 ### Commits
 
