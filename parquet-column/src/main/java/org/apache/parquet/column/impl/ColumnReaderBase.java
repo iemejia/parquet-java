@@ -832,11 +832,7 @@ abstract class ColumnReaderBase implements ColumnReader {
 
     @Override
     int nextInt() {
-      try {
-        return delegate.readInt();
-      } catch (IOException e) {
-        throw new ParquetDecodingException(e);
-      }
+      return delegate.readInt();
     }
   }
 

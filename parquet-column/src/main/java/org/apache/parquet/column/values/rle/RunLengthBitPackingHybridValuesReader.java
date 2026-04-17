@@ -22,7 +22,6 @@ import java.io.IOException;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.BytesUtils;
 import org.apache.parquet.column.values.ValuesReader;
-import org.apache.parquet.io.ParquetDecodingException;
 
 /**
  * This ValuesReader does all the reading in {@link #initFromPage}
@@ -47,11 +46,7 @@ public class RunLengthBitPackingHybridValuesReader extends ValuesReader {
 
   @Override
   public int readInteger() {
-    try {
-      return decoder.readInt();
-    } catch (IOException e) {
-      throw new ParquetDecodingException(e);
-    }
+    return decoder.readInt();
   }
 
   @Override

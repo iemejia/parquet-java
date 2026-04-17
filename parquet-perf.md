@@ -1123,6 +1123,106 @@ All 573 `parquet-column` tests + 9 RLE-specific tests pass with zero failures.
 
 ---
 
+## Improvement 14: RLE Decoder — Remove Checked IOException from readInt()
+
+### Round 9 — Read-path optimizations (continued)
+
+### Problem
+
+`RunLengthBitPackingHybridDecoder.readInt()` declares `throws IOException`, forcing every
+caller to wrap the call in a try-catch block that converts to `ParquetDecodingException`.
+This pattern appears in:
+
+- `DictionaryValuesReader` — 7 methods (readBytes, readFloat, readDouble, readInteger, readLong,
+  readValueDictionaryId, skip), each with its own try-catch block
+- `RunLengthBitPackingHybridValuesReader.readInteger()` — 1 try-catch block
+- `ColumnReaderBase.RLEIntIterator.nextInt()` — 1 try-catch block (called for every
+  definition/repetition level read)
+
+That's 9 try-catch blocks in 3 files, all doing the same `catch (IOException e) { throw new
+ParquetDecodingException(e); }`.
+
+### Solution
+
+Move the IOException handling inside `readInt()` itself: catch IOException from `readNext()`
+and wrap in `ParquetDecodingException`. Remove `throws IOException` from the signature.
+All 9 caller try-catch blocks become unnecessary and are removed.
+
+### Files Modified
+
+1. `parquet-column/src/main/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridDecoder.java`
+2. `parquet-column/src/main/java/org/apache/parquet/column/values/dictionary/DictionaryValuesReader.java`
+3. `parquet-column/src/main/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridValuesReader.java`
+4. `parquet-column/src/main/java/org/apache/parquet/column/impl/ColumnReaderBase.java`
+
+### Results
+
+Micro-benchmarks: `IntEncodingBenchmark.decodeRle` and `IntEncodingBenchmark.decodeDictionary`
+
+| Benchmark | Pattern | Baseline (ops/s) | Optimized (ops/s) | Change |
+|---|---|---|---|---|
+| decodeRle | RANDOM | 112,138,596 | 112,405,846 | within noise |
+| decodeDictionary | RANDOM | 93,063,173 | 92,793,476 | within noise |
+
+**No measurable performance improvement.** Modern JVMs handle try-catch blocks with zero overhead
+on the non-exception path — the exception handler is registered in the bytecode exception table
+but generates no per-call instructions. The change is retained as a code quality improvement:
+simpler callers, cleaner API, and consistent exception handling.
+
+### Tests
+
+All 573 `parquet-column` tests pass with zero failures.
+
+---
+
+## Improvement 15: BinaryPlainValuesReader — Direct ByteBuffer Reads
+
+### Problem
+
+`BinaryPlainValuesReader.readBytes()` reads the 4-byte length prefix of each binary value
+using `BytesUtils.readIntLittleEndian(in)`, which performs 4 separate `in.read()` virtual calls
+through the `ByteBufferInputStream` chain — the same problem as Improvement 12 for numeric
+plain readers.
+
+Additionally, the binary data itself was read via `in.slice(length)` on a `ByteBufferInputStream`,
+adding unnecessary method dispatch overhead.
+
+### Solution
+
+Same approach as Improvement 12: in `initFromPage()`, obtain the page data as a single
+contiguous `ByteBuffer` via `stream.slice(stream.available())` with `LITTLE_ENDIAN` byte order.
+
+- Length prefix: `buffer.getInt()` (single JVM intrinsic, replaces 4 virtual reads)
+- Binary data: `buffer.slice()` + `limit(length)` (zero-copy view from the ByteBuffer)
+- Skip: `buffer.getInt()` + `buffer.position(buffer.position() + length)`
+
+### Files Modified
+
+1. `parquet-column/src/main/java/org/apache/parquet/column/values/plain/BinaryPlainValuesReader.java`
+
+### Results
+
+Micro-benchmark: `BinaryEncodingBenchmark.decodePlain` (100,000 BINARY values per invocation)
+
+| Cardinality | String Length | Baseline (ops/s) | Optimized (ops/s) | Improvement |
+|---|---|---|---|---|
+| LOW | 10 | 21,992,203 | 24,629,299 | **+12.0%** |
+| LOW | 100 | 20,001,567 | 20,532,222 | +2.7% |
+| LOW | 1000 | 9,022,357 | 9,290,204 | +3.0% |
+| HIGH | 10 | 21,211,350 | 24,548,009 | **+15.7%** |
+| HIGH | 100 | 20,149,876 | 21,329,196 | **+5.9%** |
+| HIGH | 1000 | 8,215,046 | 8,685,848 | +5.7% |
+
+The improvement is most pronounced for short strings (10 bytes): **+12-16%**, where the 4-byte
+length prefix read is a significant fraction of per-value cost (~29% of I/O). For longer strings,
+the data slicing dominates and the improvement is smaller (+3-6%).
+
+### Tests
+
+All 573 `parquet-column` tests pass with zero failures.
+
+---
+
 ## Summary Table
 
 | # | Optimization | Module | Benchmark | Improvement |
@@ -1140,6 +1240,8 @@ All 573 `parquet-column` tests + 9 RLE-specific tests pass with zero failures.
 | 11 | Eager column buffer release during flush | parquet-hadoop | RowGroupFlushBenchmark | **No effect** (peak set during write phase, not flush) |
 | 12 | PlainValuesReader: direct ByteBuffer reads | parquet-column | decodePlain | **+1,130% (12.3×)** |
 | 13 | RLE decoder: cache DataInputStream + forward index | parquet-column | decodeRle | **No measurable effect** (code quality) |
+| 14 | RLE decoder readInt(): remove checked IOException | parquet-column | decodeDictionary | **No measurable effect** (code quality) |
+| 15 | BinaryPlainValuesReader: direct ByteBuffer reads | parquet-column | decodePlain (binary) | **+12% to +16%** (short strings) |
 
 ### Files Modified (Round 7)
 
@@ -1150,6 +1252,14 @@ All 573 `parquet-column` tests + 9 RLE-specific tests pass with zero failures.
 
 1. `parquet-column/src/main/java/org/apache/parquet/column/values/plain/PlainValuesReader.java`
 2. `parquet-column/src/main/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridDecoder.java`
+
+### Files Modified (Round 9)
+
+1. `parquet-column/src/main/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridDecoder.java`
+2. `parquet-column/src/main/java/org/apache/parquet/column/values/dictionary/DictionaryValuesReader.java`
+3. `parquet-column/src/main/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridValuesReader.java`
+4. `parquet-column/src/main/java/org/apache/parquet/column/impl/ColumnReaderBase.java`
+5. `parquet-column/src/main/java/org/apache/parquet/column/values/plain/BinaryPlainValuesReader.java`
 
 ### Commits
 

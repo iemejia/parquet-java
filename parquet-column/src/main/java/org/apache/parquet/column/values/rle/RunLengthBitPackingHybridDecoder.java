@@ -65,23 +65,32 @@ public class RunLengthBitPackingHybridDecoder {
     this.dataIn = new DataInputStream(in);
   }
 
-  public int readInt() throws IOException {
-    if (currentCount == 0) {
-      readNext();
+  /**
+   * Reads the next int value from the RLE/Bit-Packing hybrid stream.
+   *
+   * <p>IOException from the underlying stream is caught and wrapped in
+   * {@link ParquetDecodingException} to avoid per-call try-catch overhead in callers.
+   *
+   * @return the next decoded integer value
+   * @throws ParquetDecodingException if an I/O error occurs in the underlying stream
+   */
+  public int readInt() {
+    try {
+      if (currentCount == 0) {
+        readNext();
+      }
+    } catch (IOException e) {
+      throw new ParquetDecodingException("Failed to read next RLE/BitPacking value", e);
     }
     --currentCount;
-    int result;
     switch (mode) {
       case RLE:
-        result = currentValue;
-        break;
+        return currentValue;
       case PACKED:
-        result = currentBuffer[currentBufferIdx++];
-        break;
+        return currentBuffer[currentBufferIdx++];
       default:
         throw new ParquetDecodingException("not a valid mode " + mode);
     }
-    return result;
   }
 
   private void readNext() throws IOException {

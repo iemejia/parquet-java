@@ -24,14 +24,19 @@ import java.nio.ByteBuffer;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import org.apache.parquet.bytes.ByteBufferInputStream;
+import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.bytes.HeapByteBufferAllocator;
+import org.apache.parquet.column.Dictionary;
 import org.apache.parquet.column.Encoding;
+import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.values.ValuesWriter;
 import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesReaderForInteger;
 import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesWriter;
 import org.apache.parquet.column.values.delta.DeltaBinaryPackingValuesReader;
 import org.apache.parquet.column.values.delta.DeltaBinaryPackingValuesWriterForInteger;
+import org.apache.parquet.column.values.dictionary.DictionaryValuesReader;
 import org.apache.parquet.column.values.dictionary.DictionaryValuesWriter;
+import org.apache.parquet.column.values.dictionary.PlainValuesDictionary;
 import org.apache.parquet.column.values.plain.PlainValuesReader;
 import org.apache.parquet.column.values.plain.PlainValuesWriter;
 import org.apache.parquet.column.values.rle.RunLengthBitPackingHybridDecoder;
@@ -81,6 +86,8 @@ public class IntEncodingBenchmark {
   private byte[] bssEncoded;
   private byte[] rleEncoded;
   private int rleBitWidth;
+  private byte[] dictDataEncoded;
+  private Dictionary intDictionary;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
@@ -117,6 +124,16 @@ public class IntEncodingBenchmark {
     }
     rleEncoded = rleEncoder.toBytes().toByteArray();
     rleEncoder.close();
+
+    // Pre-encode dictionary data for decode benchmark
+    DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter dictWriter = newDictWriter();
+    for (int v : data) {
+      dictWriter.writeInteger(v);
+    }
+    BytesInput dictDataBytes = dictWriter.getBytes();
+    dictDataEncoded = dictDataBytes.toByteArray();
+    DictionaryPage dictPage = dictWriter.toDictPageAndClose().copy();
+    intDictionary = new PlainValuesDictionary.PlainIntegerDictionary(dictPage);
   }
 
   private byte[] encodeWith(ValuesWriter writer) throws IOException {
@@ -214,6 +231,16 @@ public class IntEncodingBenchmark {
         new RunLengthBitPackingHybridDecoder(rleBitWidth, new ByteArrayInputStream(rleEncoded));
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(decoder.readInt());
+    }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeDictionary(Blackhole bh) throws IOException {
+    DictionaryValuesReader reader = new DictionaryValuesReader(intDictionary);
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(dictDataEncoded)));
+    for (int i = 0; i < VALUE_COUNT; i++) {
+      bh.consume(reader.readInteger());
     }
   }
 }
