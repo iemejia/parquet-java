@@ -43,12 +43,13 @@ public class RunLengthBitPackingHybridDecoder {
   private final int bitWidth;
   private final BytePacker packer;
   private final InputStream in;
+  private final DataInputStream dataIn;
 
   private MODE mode;
   private int currentCount;
   private int currentValue;
   private int[] currentBuffer;
-  private int currentBufferLength;
+  private int currentBufferIdx;
 
   // Reusable buffers to avoid per-run allocation in PACKED mode
   private int[] packedValuesBuffer = new int[0];
@@ -61,6 +62,7 @@ public class RunLengthBitPackingHybridDecoder {
     this.bitWidth = bitWidth;
     this.packer = Packer.LITTLE_ENDIAN.newBytePacker(bitWidth);
     this.in = in;
+    this.dataIn = new DataInputStream(in);
   }
 
   public int readInt() throws IOException {
@@ -74,7 +76,7 @@ public class RunLengthBitPackingHybridDecoder {
         result = currentValue;
         break;
       case PACKED:
-        result = currentBuffer[currentBufferLength - 1 - currentCount];
+        result = currentBuffer[currentBufferIdx++];
         break;
       default:
         throw new ParquetDecodingException("not a valid mode " + mode);
@@ -95,7 +97,7 @@ public class RunLengthBitPackingHybridDecoder {
       case PACKED:
         int numGroups = header >>> 1;
         currentCount = numGroups * 8;
-        currentBufferLength = currentCount;
+        currentBufferIdx = 0;
         LOG.debug("reading {} values BIT PACKED", currentCount);
         if (packedValuesBuffer.length < currentCount) {
           packedValuesBuffer = new int[currentCount];
@@ -108,7 +110,7 @@ public class RunLengthBitPackingHybridDecoder {
         // At the end of the file RLE data though, there might not be that many bytes left.
         int bytesToRead = (int) Math.ceil(currentCount * bitWidth / 8.0);
         bytesToRead = Math.min(bytesToRead, in.available());
-        new DataInputStream(in).readFully(packedBytesBuffer, 0, bytesToRead);
+        dataIn.readFully(packedBytesBuffer, 0, bytesToRead);
         for (int valueIndex = 0, byteIndex = 0;
             valueIndex < currentCount;
             valueIndex += 8, byteIndex += bitWidth) {

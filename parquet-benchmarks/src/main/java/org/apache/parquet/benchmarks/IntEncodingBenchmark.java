@@ -18,6 +18,7 @@
  */
 package org.apache.parquet.benchmarks;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Random;
@@ -33,6 +34,8 @@ import org.apache.parquet.column.values.delta.DeltaBinaryPackingValuesWriterForI
 import org.apache.parquet.column.values.dictionary.DictionaryValuesWriter;
 import org.apache.parquet.column.values.plain.PlainValuesReader;
 import org.apache.parquet.column.values.plain.PlainValuesWriter;
+import org.apache.parquet.column.values.rle.RunLengthBitPackingHybridDecoder;
+import org.apache.parquet.column.values.rle.RunLengthBitPackingHybridEncoder;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -76,6 +79,8 @@ public class IntEncodingBenchmark {
   private byte[] plainEncoded;
   private byte[] deltaEncoded;
   private byte[] bssEncoded;
+  private byte[] rleEncoded;
+  private int rleBitWidth;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
@@ -102,6 +107,16 @@ public class IntEncodingBenchmark {
     plainEncoded = encodeWith(newPlainWriter());
     deltaEncoded = encodeWith(newDeltaWriter());
     bssEncoded = encodeWith(newBssWriter());
+
+    // Pre-encode RLE data (using 10-bit values to simulate dictionary indices)
+    rleBitWidth = 10;
+    RunLengthBitPackingHybridEncoder rleEncoder =
+        new RunLengthBitPackingHybridEncoder(rleBitWidth, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    for (int v : data) {
+      rleEncoder.writeInt(v & 0x3FF); // mask to 10 bits
+    }
+    rleEncoded = rleEncoder.toBytes().toByteArray();
+    rleEncoder.close();
   }
 
   private byte[] encodeWith(ValuesWriter writer) throws IOException {
@@ -189,6 +204,16 @@ public class IntEncodingBenchmark {
     reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(bssEncoded)));
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(reader.readInteger());
+    }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeRle(Blackhole bh) throws IOException {
+    RunLengthBitPackingHybridDecoder decoder =
+        new RunLengthBitPackingHybridDecoder(rleBitWidth, new ByteArrayInputStream(rleEncoded));
+    for (int i = 0; i < VALUE_COUNT; i++) {
+      bh.consume(decoder.readInt());
     }
   }
 }
