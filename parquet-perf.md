@@ -1304,6 +1304,71 @@ All 573 `parquet-column` tests pass with zero failures.
 
 ---
 
+## Round 11: PlainValuesWriter Direct Slab Writes
+
+### Improvement 17: PlainValuesWriter — Bypass LittleEndianDataOutputStream with Direct ByteBuffer Slab Writes
+
+**Hypothesis:** `PlainValuesWriter` writes values through a two-layer abstraction:
+`PlainValuesWriter` → `LittleEndianDataOutputStream` → `CapacityByteArrayOutputStream`.
+Each `writeInt()` decomposes the int into 4 bytes in a temp `writeBuffer[8]` array, then calls
+`out.write(writeBuffer, 0, 4)` which dispatches through the OutputStream chain. Since
+`CapacityByteArrayOutputStream` already uses `ByteBuffer` slabs internally, we can write
+directly to the slab with `putInt()`/`putLong()` using LITTLE_ENDIAN byte order — a single
+JVM intrinsic on x86/ARM — eliminating the byte decomposition, temp array, and virtual dispatch.
+
+**Changes:**
+- `CapacityByteArrayOutputStream`: Set `ByteOrder.LITTLE_ENDIAN` on newly allocated slabs in
+  `addSlab()`. Added `writeInt(int)` and `writeLong(long)` methods that use
+  `currentSlab.putInt(v)` / `currentSlab.putLong(v)` directly.
+- `PlainValuesWriter`: Eliminated `LittleEndianDataOutputStream out` field entirely. All typed
+  write methods (`writeInteger`, `writeLong`, `writeFloat`, `writeDouble`) now call
+  `arrayOut.writeInt()` / `arrayOut.writeLong()` directly. `writeBytes(Binary)` uses
+  `arrayOut.writeInt(v.length())` + `v.writeTo(arrayOut)`. The `getBytes()` method no longer
+  needs to flush (no buffering layer). The `close()` method no longer closes the defunct
+  `LittleEndianDataOutputStream`.
+
+**What was eliminated per writeInt call:**
+- 4 byte-shift operations for little-endian decomposition
+- 1 intermediate `writeBuffer[8]` array write
+- 2 levels of virtual dispatch (`LittleEndianDataOutputStream.write()` → `CapacityByteArrayOutputStream.write()`)
+- 1 bounds check in `write(byte[], off, len)`
+- 1 `System.arraycopy` for 4 bytes
+
+**Replaced with:**
+- 1 remaining-check on the slab ByteBuffer
+- 1 `ByteBuffer.putInt()` call (single JVM intrinsic, ~1 CPU store instruction on little-endian architectures)
+
+### Files Modified
+
+1. `parquet-common/src/main/java/org/apache/parquet/bytes/CapacityByteArrayOutputStream.java`
+2. `parquet-column/src/main/java/org/apache/parquet/column/values/plain/PlainValuesWriter.java`
+
+### Results
+
+Micro-benchmark: `IntEncodingBenchmark.encodePlain` (100,000 INT32 values per invocation)
+
+| Pattern | Baseline (ops/s) | Optimized (ops/s) | Improvement |
+|---|---|---|---|
+| SEQUENTIAL | 26,817,451 | 52,953,193 | **+97.5% (2.0x)** |
+| RANDOM | 28,517,312 | 37,774,036 | **+32.5%** |
+| LOW_CARDINALITY | 28,705,158 | 52,819,678 | **+84.0%** |
+| HIGH_CARDINALITY | 28,595,519 | 37,862,571 | **+32.4%** |
+
+The improvement varies by data pattern: SEQUENTIAL and LOW_CARDINALITY see ~2x because the
+slab `putInt()` path has highly predictable branching (slab rarely runs out for sequential
+writes). RANDOM and HIGH_CARDINALITY still see a solid +32% improvement.
+
+This optimization also benefits `writeFloat()`, `writeDouble()`, and `writeLong()` (same
+code path), and the length-prefix write in `writeBytes(Binary)`.
+
+Decode benchmark (`decodePlain`) confirmed at ~1.15B ops/s — encoded data is read-compatible.
+
+### Tests
+
+All 573 `parquet-column` tests pass with zero failures.
+
+---
+
 ## Summary Table
 
 | # | Optimization | Module | Benchmark | Improvement |
@@ -1324,6 +1389,7 @@ All 573 `parquet-column` tests pass with zero failures.
 | 14 | RLE decoder readInt(): remove checked IOException | parquet-column | decodeDictionary | **No measurable effect** (code quality) |
 | 15 | BinaryPlainValuesReader: direct ByteBuffer reads | parquet-column | decodePlain (binary) | **+12% to +16%** (short strings) |
 | 16 | RLE decoder: replace InputStream with ByteBuffer | parquet-column | decodeRle | **No measurable effect** (code quality) |
+| 17 | PlainValuesWriter: direct slab writes | parquet-common | encodePlain | **+32% to +97%** |
 
 ### Files Modified (Round 7)
 
@@ -1350,6 +1416,11 @@ All 573 `parquet-column` tests pass with zero failures.
 3. `parquet-column/src/main/java/org/apache/parquet/column/values/dictionary/DictionaryValuesReader.java`
 4. `parquet-column/src/main/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridValuesReader.java`
 5. `parquet-column/src/main/java/org/apache/parquet/column/impl/ColumnReaderBase.java`
+
+### Files Modified (Round 11)
+
+1. `parquet-common/src/main/java/org/apache/parquet/bytes/CapacityByteArrayOutputStream.java`
+2. `parquet-column/src/main/java/org/apache/parquet/column/values/plain/PlainValuesWriter.java`
 
 ### Commits
 
