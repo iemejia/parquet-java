@@ -1551,6 +1551,63 @@ allocation and the LEDO dispatch chain yields 23-33% improvement. Decode benchma
 
 ---
 
+## Round 15: Dictionary Writer and FixedLenByteArray Writer Cleanup
+
+### Improvement 22: FixedLenByteArrayPlainValuesWriter — Eliminate LittleEndianDataOutputStream Wrapper
+
+**Hypothesis:** Same pattern as DeltaLengthByteArrayValuesWriter (Improvement 21). The writer wrapped
+`CapacityByteArrayOutputStream` with `LittleEndianDataOutputStream` but only used raw byte writes
+(`Binary.writeTo()`), never any typed LE methods. The wrapper added an unnecessary virtual dispatch.
+
+**Fix:** Removed the LEDO wrapper. `Binary.writeTo()` now writes directly to `CapacityByteArrayOutputStream`.
+Also removed the unnecessary `out.flush()` from `getBytes()`.
+
+### Improvement 23: Dictionary Writers — Replace LinkedOpenHashMap with OpenHashMap + ArrayList
+
+**Hypothesis:** The `PlainBinaryDictionaryValuesWriter`, `PlainLongDictionaryValuesWriter`,
+`PlainDoubleDictionaryValuesWriter`, and `PlainFloatDictionaryValuesWriter` all used
+`*2IntLinkedOpenHashMap` to maintain insertion-order iteration for `toDictPageAndClose()`.
+`LinkedOpenHashMap` maintains a doubly-linked list of entries, adding ~16 bytes per entry and
+linked-list maintenance overhead on every insert. The `PlainIntegerDictionaryValuesWriter` was already
+optimized to use `OpenHashMap` + `ArrayList` in a previous round.
+
+**Fix:** Replaced all remaining `*2IntLinkedOpenHashMap` instances with `*2IntOpenHashMap` +
+type-specific `ArrayList` (e.g., `LongArrayList`, `DoubleArrayList`, `FloatArrayList`,
+`ArrayList<Binary>`). Insertion order is maintained by the ArrayList; the hash map only maps
+values → dictionary IDs. Also simplified `fallBackDictionaryEncodedData()` — the reverse dictionary
+array is no longer needed since the ordered ArrayList already provides O(1) index-based access.
+
+### Files Modified
+
+1. `parquet-column/src/main/java/org/apache/parquet/column/values/plain/FixedLenByteArrayPlainValuesWriter.java`
+2. `parquet-column/src/main/java/org/apache/parquet/column/values/dictionary/DictionaryValuesWriter.java`
+
+### Results
+
+**Binary dictionary encode** (improvement 23):
+
+| Cardinality | String Length | Baseline (ops/s) | Optimized (ops/s) | Change |
+|---|---|---|---|---|
+| LOW | 10 | 20,110,049 ± 135K | 19,729,272 ± 233K | ~0% |
+| LOW | 100 | 18,213,320 ± 186K | 19,007,260 ± 139K | +4.4% |
+| LOW | 1000 | 22,310,845 ± 309K | 22,280,626 ± 183K | ~0% |
+| HIGH | 10 | 1,363,108 ± 166K | 1,929,122 ± 180K | **+42%** |
+| HIGH | 100 | 1,324,533 ± 137K | 1,623,701 ± 220K | **+23%** |
+| HIGH | 1000 | 1,203,095 ± 84K | 1,565,471 ± 112K | **+30%** |
+
+For HIGH cardinality (all unique values), every value triggers a hash map insert. Replacing
+`LinkedOpenHashMap` with `OpenHashMap` + `ArrayList` eliminates linked-list pointer maintenance
+on every insert, yielding +23% to +42% improvement. For LOW cardinality (lookup-dominated),
+no meaningful change — hash table probing overhead is identical.
+
+Int dictionary encode was unchanged (already used OpenHashMap + ArrayList from a previous round).
+
+### Tests
+
+- 23 tests pass: 20 Dictionary + 3 FixedLen (0 failures)
+
+---
+
 ## Summary Table
 
 | # | Optimization | Module | Benchmark | Improvement |
@@ -1576,6 +1633,8 @@ allocation and the LEDO dispatch chain yields 23-33% improvement. Decode benchma
 | 19 | Page assembly: eliminate BAOSBytesInput copy + streaming CRC | parquet-common, parquet-hadoop | FileWriteBenchmark | **Code quality** (eliminates page-size alloc+copy per compressed page) |
 | 20 | DeltaByteArrayWriter: avoid Binary.slice() per value | parquet-column | encodeDeltaByteArray | **+23% to +33%** (short strings) |
 | 21 | DeltaLengthByteArrayValuesWriter: eliminate LE wrapper | parquet-column | encodeDeltaLengthByteArray | **+16% to +18%** (short strings) |
+| 22 | FixedLenByteArrayPlainValuesWriter: eliminate LE wrapper | parquet-column | — | Code quality (same pattern as #21) |
+| 23 | Dictionary writers: OpenHashMap + ArrayList | parquet-column | encodeDictionary (binary) | **+23% to +42%** (high cardinality) |
 
 ### Files Modified (Round 7)
 
@@ -1621,6 +1680,11 @@ allocation and the LEDO dispatch chain yields 23-33% improvement. Decode benchma
 
 1. `parquet-column/src/main/java/org/apache/parquet/column/values/deltastrings/DeltaByteArrayWriter.java`
 2. `parquet-column/src/main/java/org/apache/parquet/column/values/deltalengthbytearray/DeltaLengthByteArrayValuesWriter.java`
+
+### Files Modified (Round 15)
+
+1. `parquet-column/src/main/java/org/apache/parquet/column/values/plain/FixedLenByteArrayPlainValuesWriter.java`
+2. `parquet-column/src/main/java/org/apache/parquet/column/values/dictionary/DictionaryValuesWriter.java`
 
 ### Commits
 
