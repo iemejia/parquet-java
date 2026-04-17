@@ -19,8 +19,12 @@
 package org.apache.parquet.benchmarks;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import org.apache.parquet.bytes.ByteBufferAllocator;
+import org.apache.parquet.bytes.HeapByteBufferAllocator;
 import org.apache.parquet.column.ParquetProperties.WriterVersion;
 import org.apache.parquet.example.data.Group;
 import org.apache.parquet.example.data.simple.SimpleGroupFactory;
@@ -28,6 +32,10 @@ import org.apache.parquet.hadoop.ParquetFileWriter;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.example.ExampleParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
+import org.apache.parquet.io.api.Binary;
+import org.apache.parquet.schema.MessageType;
+import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
+import org.apache.parquet.schema.Types;
 import org.openjdk.jmh.annotations.AuxCounters;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -43,83 +51,139 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
 
 /**
- * Benchmark measuring row group flush performance and memory usage.
+ * Benchmark measuring row group flush performance and peak buffer memory.
  *
- * <p>Writes enough rows to trigger at least one row group flush, using a
- * {@link BlackHoleOutputFile} to isolate the flush cost from filesystem I/O.
- * Reports both wall-clock time and peak heap memory used during the write.
+ * <p>Uses a wide schema (20 BINARY columns, 200 bytes each) to produce
+ * substantial per-column page buffers. A {@link PeakTrackingAllocator}
+ * wraps the heap allocator to precisely track the peak bytes outstanding
+ * across all parquet-managed ByteBuffers (independent of JVM GC behavior).
  *
- * <p>The row group size is set deliberately small (8MB) so that multiple
- * flushes occur within a single benchmark invocation, making the flush
- * overhead a significant fraction of the total time.
+ * <p>The key metric is {@code peakAllocatorMB}: with the interleaved flush
+ * optimization, each column's pages are finalized, written, and released
+ * before the next column is processed, so peak buffer memory is roughly
+ * 1/N of the total row group size (N = number of columns).
+ *
+ * <p>Writes to {@link BlackHoleOutputFile} to isolate flush cost from
+ * filesystem I/O.
  */
-@BenchmarkMode({Mode.SingleShotTime, Mode.AverageTime})
-@Fork(value = 1, jvmArgs = {"-Xms256m", "-Xmx512m"})
-@Warmup(iterations = 3, batchSize = 1)
-@Measurement(iterations = 5, batchSize = 1)
+@BenchmarkMode({Mode.AverageTime})
+@Fork(value = 1, jvmArgs = {"-Xms512m", "-Xmx1g"})
+@Warmup(iterations = 2)
+@Measurement(iterations = 3)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Thread)
 public class RowGroupFlushBenchmark {
 
-  /** Number of rows to write -- enough to trigger multiple row group flushes at 8MB row groups. */
-  private static final int ROW_COUNT = 500_000;
+  private static final int COLUMN_COUNT = 20;
+  private static final int BINARY_VALUE_LENGTH = 200;
+  private static final int ROW_COUNT = 100_000;
 
-  /** Small row group size to trigger multiple flushes per benchmark invocation. */
-  private static final int ROW_GROUP_SIZE = 8 * 1024 * 1024; // 8 MB
+  /** Row group sizes: 8MB and 64MB. */
+  @Param({"8388608", "67108864"})
+  public int rowGroupSize;
 
-  @Param({"UNCOMPRESSED", "SNAPPY"})
-  public String codec;
+  /** Wide schema: 20 required BINARY columns. */
+  private static final MessageType WIDE_SCHEMA;
 
-  @Param({"PARQUET_1_0", "PARQUET_2_0"})
-  public String writerVersion;
+  static {
+    Types.MessageTypeBuilder builder = Types.buildMessage();
+    for (int c = 0; c < COLUMN_COUNT; c++) {
+      builder.required(PrimitiveTypeName.BINARY).named("col_" + c);
+    }
+    WIDE_SCHEMA = builder.named("wide_record");
+  }
+
+  /** Pre-generated column values (one unique value per column). */
+  private Binary[] columnValues;
+
+  @Setup(Level.Trial)
+  public void setup() {
+    Random random = new Random(42);
+    columnValues = new Binary[COLUMN_COUNT];
+    for (int c = 0; c < COLUMN_COUNT; c++) {
+      byte[] value = new byte[BINARY_VALUE_LENGTH];
+      random.nextBytes(value);
+      columnValues[c] = Binary.fromConstantByteArray(value);
+    }
+  }
 
   /**
-   * Auxiliary counters reported alongside the benchmark timing.
-   * JMH collects these after each iteration.
+   * Auxiliary counters reported alongside timing. JMH collects these after
+   * each iteration.
    */
   @AuxCounters(AuxCounters.Type.EVENTS)
   @State(Scope.Thread)
   public static class MemoryCounters {
-    /** Peak heap memory used (bytes) during the benchmark iteration. */
-    public long peakMemoryUsedBytes;
+    /** Peak bytes outstanding in the parquet ByteBufferAllocator. */
+    public long peakAllocatorBytes;
+
+    /** Convenience: peak in MB (peakAllocatorBytes / 1048576). */
+    public double peakAllocatorMB;
 
     @Setup(Level.Iteration)
     public void reset() {
-      peakMemoryUsedBytes = 0;
+      peakAllocatorBytes = 0;
+      peakAllocatorMB = 0;
+    }
+  }
+
+  /**
+   * ByteBufferAllocator wrapper that tracks current and peak allocated bytes.
+   * Thread-safe (uses AtomicLong) although the write path is single-threaded.
+   */
+  static class PeakTrackingAllocator implements ByteBufferAllocator {
+    private final ByteBufferAllocator delegate = new HeapByteBufferAllocator();
+    private final AtomicLong currentBytes = new AtomicLong();
+    private final AtomicLong peakBytes = new AtomicLong();
+
+    @Override
+    public ByteBuffer allocate(int size) {
+      ByteBuffer buf = delegate.allocate(size);
+      long current = currentBytes.addAndGet(buf.capacity());
+      peakBytes.accumulateAndGet(current, Math::max);
+      return buf;
+    }
+
+    @Override
+    public void release(ByteBuffer buf) {
+      currentBytes.addAndGet(-buf.capacity());
+      delegate.release(buf);
+    }
+
+    @Override
+    public boolean isDirect() {
+      return delegate.isDirect();
+    }
+
+    long getPeakBytes() {
+      return peakBytes.get();
     }
   }
 
   @Benchmark
   public void writeWithFlush(MemoryCounters counters) throws IOException {
-    // Force GC before measurement for a clean baseline
-    System.gc();
-    Runtime runtime = Runtime.getRuntime();
-    long baselineUsed = runtime.totalMemory() - runtime.freeMemory();
-    long peakUsed = baselineUsed;
-
-    SimpleGroupFactory factory = TestDataFactory.newGroupFactory();
-    Random random = new Random(42);
+    PeakTrackingAllocator allocator = new PeakTrackingAllocator();
+    SimpleGroupFactory factory = new SimpleGroupFactory(WIDE_SCHEMA);
 
     try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(BlackHoleOutputFile.INSTANCE)
         .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
-        .withType(TestDataFactory.FILE_BENCHMARK_SCHEMA)
-        .withCompressionCodec(CompressionCodecName.valueOf(codec))
-        .withWriterVersion(WriterVersion.valueOf(writerVersion))
-        .withRowGroupSize(ROW_GROUP_SIZE)
-        .withDictionaryEncoding(true)
+        .withType(WIDE_SCHEMA)
+        .withCompressionCodec(CompressionCodecName.UNCOMPRESSED)
+        .withWriterVersion(WriterVersion.PARQUET_1_0)
+        .withRowGroupSize(rowGroupSize)
+        .withDictionaryEncoding(false)
+        .withAllocator(allocator)
         .build()) {
       for (int i = 0; i < ROW_COUNT; i++) {
-        writer.write(TestDataFactory.generateRow(factory, i, random));
-        // Sample memory periodically (every 10K rows) to track peak
-        if (i % 10_000 == 0) {
-          long currentUsed = runtime.totalMemory() - runtime.freeMemory();
-          if (currentUsed > peakUsed) {
-            peakUsed = currentUsed;
-          }
+        Group group = factory.newGroup();
+        for (int c = 0; c < COLUMN_COUNT; c++) {
+          group.append("col_" + c, columnValues[c]);
         }
+        writer.write(group);
       }
     }
 
-    counters.peakMemoryUsedBytes = peakUsed - baselineUsed;
+    counters.peakAllocatorBytes = allocator.getPeakBytes();
+    counters.peakAllocatorMB = allocator.getPeakBytes() / (1024.0 * 1024.0);
   }
 }

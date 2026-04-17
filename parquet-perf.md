@@ -825,53 +825,21 @@ dfcab6420 Reduce delta decode ByteBuffer slicing overhead
 
 ### Improvement 11: Eagerly Release Column Buffers During Row Group Flush
 
+**Status: No measurable benefit. Kept as code quality improvement only.**
+
 #### Files Changed
 
 1. `parquet-hadoop/src/main/java/org/apache/parquet/hadoop/ColumnChunkPageWriteStore.java`
 2. `parquet-common/src/main/java/org/apache/parquet/bytes/ConcatenatingByteBufferCollector.java`
 
-#### Problem
+#### Problem Statement
 
-When flushing a row group to disk, the entire compressed row group was held in memory
-simultaneously, even though columns are written to the output stream one at a time.
+When flushing a row group to disk, column buffers are written to the output stream one
+at a time, but all buffers stay alive until `close()` is called after the entire flush
+loop. We hypothesized that releasing each column's buffers immediately after writing
+would reduce peak memory.
 
-The flush pipeline worked as follows:
-
-1. `InternalParquetRecordWriter.flushRowGroupToStore()` calls `columnStore.flush()` —
-   this finalizes all in-progress pages into compressed buffers in each column's
-   `ConcatenatingByteBufferCollector`.
-2. `pageStore.flushToFileWriter(writer)` iterates all columns and writes each one to disk.
-3. `AutoCloseables.uncheckedClose(columnStore, pageStore, ...)` releases **all** buffers.
-
-The critical issue was in step 2 — in `ColumnChunkPageWriteStore.flushToFileWriter()`:
-
-```java
-// Before: all column buffers stay alive until close()
-public void flushToFileWriter(ParquetFileWriter writer) throws IOException {
-    for (ColumnDescriptor path : schema.getColumns()) {
-        ColumnChunkPageWriter pageWriter = writers.get(path);
-        pageWriter.writeToFileWriter(writer);
-        // pageWriter's buf is NOT released here!
-    }
-}
-```
-
-After `writeToFileWriter()` completes for column 0, column 0's buffer is no longer needed —
-but it stays allocated until `close()` is called on the entire store in step 3. This means
-peak memory = **entire compressed row group** across all columns simultaneously.
-
-For the default 128MB row group with 6 columns, this meant ~128MB of compressed page
-buffers coexisting in memory even though only one column's data was needed at any point
-during the sequential write.
-
-#### Root Cause
-
-`ConcatenatingByteBufferCollector` (the per-column page buffer) accumulates one
-`ByteBuffer` slab per compressed page. All N columns' collectors were kept alive
-during the entire `flushToFileWriter` loop, with deferred release in a separate
-`close()` call.
-
-#### Fix
+#### What We Did
 
 **Change 1: Eager release in `flushToFileWriter()`**
 
@@ -888,9 +856,6 @@ public void flushToFileWriter(ParquetFileWriter writer) throws IOException {
 
 **Change 2: Idempotent `close()` on `ConcatenatingByteBufferCollector`**
 
-Since `ColumnChunkPageWriteStore.close()` still calls `close()` on all writers (for safety),
-the inner close must be idempotent to avoid double-release:
-
 ```java
 @Override
 public void close() {
@@ -905,72 +870,108 @@ public void close() {
 }
 ```
 
-**Change 3: Progressive slab release API**
+**Change 3: Progressive slab release API (`writeAllToAndRelease`)**
 
-Added `writeAllToAndRelease(OutputStream)` to `ConcatenatingByteBufferCollector` which
-writes each `ByteBuffer` slab and releases it back to the allocator immediately, rather
-than holding all slabs until `close()`. Available for future use where per-column memory
-during the write needs further reduction:
+Added for potential future use but not wired into the flush path.
 
-```java
-public void writeAllToAndRelease(OutputStream out) throws IOException {
-    WritableByteChannel channel = Channels.newChannel(out);
-    Iterator<ByteBuffer> it = slabs.iterator();
-    while (it.hasNext()) {
-        ByteBuffer slab = it.next();
-        channel.write(slab.duplicate());
-        allocator.release(slab);
-        it.remove();
-    }
-    size = 0;
-}
+We also attempted an **interleaved flush** where each column's pages are finalized,
+written, and released before the next column begins (combining `columnStore.flush()`
+and `pageStore.flushToFileWriter()` into a single per-column loop via a new
+`ColumnWriteStore.flushColumn(ColumnDescriptor)` API). This was hypothesized to
+reduce peak memory from all N columns to ~1 column.
+
+#### Why It Does Not Reduce Peak Memory
+
+The flush pipeline is a two-phase process:
+
+1. **Phase 1 (`columnStore.flush()`)**: Finalizes each column's last partial page
+   into a compressed `ByteBuffer` in the `ConcatenatingByteBufferCollector`.
+2. **Phase 2 (`pageStore.flushToFileWriter()`)**: Writes each column to disk.
+
+However, **most page buffers are NOT created during flush**. They are created during
+the regular write loop: as rows are added, `ColumnWriteStoreBase.sizeCheck()` triggers
+`writePage()` whenever a column's buffered data exceeds the page size threshold (~1MB).
+Each `writePage()` compresses the page data, allocates a `ByteBuffer` via the allocator,
+and stores it in the `ConcatenatingByteBufferCollector`. The column writer's
+`CapacityByteArrayOutputStream` slabs are then released (reset).
+
+**Peak memory is reached during the regular write phase**, not during flush. At any
+point in the write loop, when a page is being finalized:
+
+```
+peak = all N columns' CapacityByteArrayOutputStream slabs (unflushed data)
+     + all completed page ByteBuffers already in collectors
+     + the current page being collected
 ```
 
-#### Memory Impact
+This peak is **identical** whether the subsequent flush is batch or interleaved, because
+the flush only adds partial pages (one at a time) and never exceeds the write-phase peak.
 
-For a schema with N equal-sized columns, peak memory during flush drops from
-~N * (compressed column size) to ~1 * (compressed column size). For the default
-128MB row group with 6 columns, this is roughly a **5x reduction** in peak flush memory.
+For small row groups (8MB with 20 columns at ~204 bytes/row/column): each column
+accumulates ~410KB before flush (below the 1MB page threshold). No pages are finalized
+during writing. All finalization happens during flush. But even then, the peak occurs
+at the moment the first column's page is collected — at that instant, all 20 columns'
+stream slabs are still allocated, giving peak ≈ 20 * 410KB + 410KB ≈ 8.6MB. This is
+the same in both batch and interleaved flush.
 
-#### Correctness and Thread Safety
+Additionally, `HeapByteBufferAllocator.release()` is a **complete no-op** — it just
+returns. Buffer memory is only reclaimed by GC when references are cleared. The eager
+release clears the `slabs` list (making `ByteBuffer` objects GC-eligible) but does not
+deterministically free memory.
 
-- **No metadata loss**: All column metadata (statistics, column indexes, offset indexes,
-  encodings) has already been passed to `ParquetFileWriter.writeColumnChunk()` before
-  `close()` is called.
-- **Thread safety**: The entire flush path is single-threaded (one writer per
-  `InternalParquetRecordWriter`). Verified with `ConcurrentCorrectnessTest` (8 threads
-  writing concurrently).
-- **Double-close safety**: `ConcatenatingByteBufferCollector.close()` and
-  `ByteBufferReleaser.close()` are both idempotent. Verified with `TrackingByteBufferAllocator`
-  which throws on double-release.
+#### Benchmark Results — Precise Allocator Tracking
 
-#### Benchmark Results
+`RowGroupFlushBenchmark` — 100K rows, 20 BINARY columns (200 bytes each), PLAIN
+encoding (V1), UNCOMPRESSED, dictionary disabled, `-wi 2 -i 3 -f 1`, JVM: `-Xms512m
+-Xmx1g`. Uses a `PeakTrackingAllocator` wrapper that tracks current and peak bytes
+outstanding across all parquet-managed `ByteBuffer` allocations.
 
-`RowGroupFlushBenchmark` — 500K rows, 8MB row groups (multiple flushes per invocation),
-6-column schema, `-wi 3 -i 5 -f 1`, JVM: `-Xms256m -Xmx512m`:
+| Row Group Size | Baseline Peak (MB) | Optimized Peak (MB) | Baseline Time (ms) | Optimized Time (ms) |
+|---|---|---|---|---|
+| 8 MB  | **9.381** | **9.381** | 2056.7 ± 62.5 | 2015.9 ± 156.8 |
+| 64 MB | **66.018** | **66.018** | 2164.7 ± 336.5 | 2154.1 ± 38.9 |
 
-**Average Time (avgt)**:
+**Peak allocator bytes are byte-for-byte identical** (9,836,668 and 69,225,305
+respectively). Both batch flush and interleaved flush produce the same peak because
+the peak is set during the write phase, before flush begins.
 
-| Codec | Writer Version | Time (ms/op) | Error | Peak Memory (avg, bytes) |
-|-------|---------------|-------------|-------|--------------------------|
-| UNCOMPRESSED | PARQUET_1_0 | 883.3 | ± 12.0 | 154,328K |
-| UNCOMPRESSED | PARQUET_2_0 | 797.1 | ± 17.3 | 155,992K |
-| SNAPPY | PARQUET_1_0 | 955.5 | ± 20.7 | 176,935K |
-| SNAPPY | PARQUET_2_0 | 819.8 | ± 9.5 | 162,104K |
+Throughput is also within error margins.
 
-**Single Shot (ss)**:
+#### Earlier JVM Heap Benchmark (6-column schema, 8MB row groups)
 
-| Codec | Writer Version | Time (ms/op) | Error | Peak Memory (avg, bytes) |
-|-------|---------------|-------------|-------|--------------------------|
-| UNCOMPRESSED | PARQUET_1_0 | 897.2 | ± 39.4 | 154,321K |
-| UNCOMPRESSED | PARQUET_2_0 | 831.6 | ± 86.6 | 155,961K |
-| SNAPPY | PARQUET_1_0 | 988.2 | ± 160.9 | 169,616K |
-| SNAPPY | PARQUET_2_0 | 860.8 | ± 108.3 | 162,221K |
+An earlier benchmark used JVM heap sampling (`Runtime.totalMemory() - freeMemory()`)
+instead of allocator tracking. This also showed no difference:
 
-Peak memory stays consistently around ~150-170MB across all configurations with the
-optimized flush, compared to the previous behavior where all column buffers would
-accumulate simultaneously. The write throughput shows no regression — the eager release
-adds negligible overhead (just `ByteBuffer.release()` calls happening sooner).
+| Codec | Version | Before (ms) | After (ms) | Before Peak (KB) | After Peak (KB) |
+|---|---|---|---|---|---|
+| UNCOMPRESSED | V1 | 880.9 | 883.3 | 154,312 | 154,328 |
+| UNCOMPRESSED | V2 | 799.3 | 797.1 | 155,980 | 155,992 |
+| SNAPPY | V1 | 952.1 | 955.5 | 176,820 | 176,935 |
+| SNAPPY | V2 | 821.4 | 819.8 | 162,050 | 162,104 |
+
+#### Conclusion
+
+The optimization **does not reduce peak memory or improve throughput**. The theoretical
+"N columns → 1 column" peak reduction assumed page buffers are only created during
+flush, but in practice they accumulate during the write loop. The peak is fully
+determined before flush begins.
+
+The code change is kept because:
+- It is correct resource management (release when no longer needed)
+- It has zero overhead (the `close()` calls are essentially free)
+- It makes buffers GC-eligible sooner (minor benefit under memory pressure)
+- It makes the page writers' lifecycle clearer
+
+But it should **not** be claimed as a memory optimization in a PR.
+
+#### What Would Actually Reduce Peak Memory
+
+The only way to reduce peak buffer memory during row group writing would be to **stream
+columns to disk as pages complete** rather than buffering the entire row group. However,
+this is architecturally incompatible with the current Parquet format:
+- `ParquetFileWriter.startBlock(recordCount)` needs the row count before writing begins
+- Column indexes and offset indexes require all pages to be known per-column
+- The row group metadata in the footer requires complete information about all columns
 
 #### Tests
 
@@ -1009,7 +1010,7 @@ All existing test suites pass:
 | 8 | Binary: cache hashCode for constants | parquet-column | encodeDictionary | **+43.6% to +6381%** |
 | 9 | DeltaBA reader: avoid hidden suffix copy | parquet-column | decodeDeltaByteArray | **+3.8% to +11.5%** |
 | 10 | RLE encoder: batch bit-packed groups | parquet-column | encodeDictionary | **up to +12.0%** |
-| 11 | Eager column buffer release during flush | parquet-hadoop | RowGroupFlushBenchmark | **~5x peak memory reduction** |
+| 11 | Eager column buffer release during flush | parquet-hadoop | RowGroupFlushBenchmark | **No effect** (peak set during write phase, not flush) |
 
 ### Files Modified (Round 7)
 
