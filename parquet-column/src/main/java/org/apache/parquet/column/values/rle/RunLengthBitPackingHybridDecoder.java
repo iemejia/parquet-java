@@ -18,9 +18,8 @@
  */
 package org.apache.parquet.column.values.rle;
 
-import java.io.DataInputStream;
-import java.io.IOException;
-import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import org.apache.parquet.Preconditions;
 import org.apache.parquet.bytes.BytesUtils;
 import org.apache.parquet.column.values.bitpacking.BytePacker;
@@ -42,8 +41,7 @@ public class RunLengthBitPackingHybridDecoder {
 
   private final int bitWidth;
   private final BytePacker packer;
-  private final InputStream in;
-  private final DataInputStream dataIn;
+  private final ByteBuffer buffer;
 
   private MODE mode;
   private int currentCount;
@@ -55,32 +53,24 @@ public class RunLengthBitPackingHybridDecoder {
   private int[] packedValuesBuffer = new int[0];
   private byte[] packedBytesBuffer = new byte[0];
 
-  public RunLengthBitPackingHybridDecoder(int bitWidth, InputStream in) {
+  public RunLengthBitPackingHybridDecoder(int bitWidth, ByteBuffer buffer) {
     LOG.debug("decoding bitWidth {}", bitWidth);
 
     Preconditions.checkArgument(bitWidth >= 0 && bitWidth <= 32, "bitWidth must be >= 0 and <= 32");
     this.bitWidth = bitWidth;
     this.packer = Packer.LITTLE_ENDIAN.newBytePacker(bitWidth);
-    this.in = in;
-    this.dataIn = new DataInputStream(in);
+    this.buffer = buffer.order(ByteOrder.LITTLE_ENDIAN);
   }
 
   /**
    * Reads the next int value from the RLE/Bit-Packing hybrid stream.
    *
-   * <p>IOException from the underlying stream is caught and wrapped in
-   * {@link ParquetDecodingException} to avoid per-call try-catch overhead in callers.
-   *
    * @return the next decoded integer value
-   * @throws ParquetDecodingException if an I/O error occurs in the underlying stream
+   * @throws ParquetDecodingException if a decoding error occurs
    */
   public int readInt() {
-    try {
-      if (currentCount == 0) {
-        readNext();
-      }
-    } catch (IOException e) {
-      throw new ParquetDecodingException("Failed to read next RLE/BitPacking value", e);
+    if (currentCount == 0) {
+      readNext();
     }
     --currentCount;
     switch (mode) {
@@ -93,15 +83,15 @@ public class RunLengthBitPackingHybridDecoder {
     }
   }
 
-  private void readNext() throws IOException {
-    Preconditions.checkArgument(in.available() > 0, "Reading past RLE/BitPacking stream.");
-    final int header = BytesUtils.readUnsignedVarInt(in);
+  private void readNext() {
+    Preconditions.checkArgument(buffer.hasRemaining(), "Reading past RLE/BitPacking stream.");
+    final int header = BytesUtils.readUnsignedVarInt(buffer);
     mode = (header & 1) == 0 ? MODE.RLE : MODE.PACKED;
     switch (mode) {
       case RLE:
         currentCount = header >>> 1;
         LOG.debug("reading {} values RLE", currentCount);
-        currentValue = BytesUtils.readIntLittleEndianPaddedOnBitWidth(in, bitWidth);
+        currentValue = BytesUtils.readIntLittleEndianPaddedOnBitWidth(buffer, bitWidth);
         break;
       case PACKED:
         int numGroups = header >>> 1;
@@ -118,8 +108,8 @@ public class RunLengthBitPackingHybridDecoder {
         }
         // At the end of the file RLE data though, there might not be that many bytes left.
         int bytesToRead = (int) Math.ceil(currentCount * bitWidth / 8.0);
-        bytesToRead = Math.min(bytesToRead, in.available());
-        dataIn.readFully(packedBytesBuffer, 0, bytesToRead);
+        bytesToRead = Math.min(bytesToRead, buffer.remaining());
+        buffer.get(packedBytesBuffer, 0, bytesToRead);
         for (int valueIndex = 0, byteIndex = 0;
             valueIndex < currentCount;
             valueIndex += 8, byteIndex += bitWidth) {

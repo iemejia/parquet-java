@@ -1223,6 +1223,87 @@ All 573 `parquet-column` tests pass with zero failures.
 
 ---
 
+## Round 10: RLE Decoder Direct ByteBuffer Reads
+
+### Improvement 16: RLE Decoder — Replace InputStream with Direct ByteBuffer
+
+**Hypothesis:** The `RunLengthBitPackingHybridDecoder` reads all data through an `InputStream`
+abstraction (`ByteBufferInputStream`), requiring virtual method dispatches on every `in.read()`
+and `in.available()` call. Replacing with direct `ByteBuffer` access should eliminate these
+dispatches, following the same pattern that yielded 12.3x for `PlainValuesReader` (Improvement 12).
+
+**Changes:**
+- Added `BytesUtils.readUnsignedVarInt(ByteBuffer)` — reads varint directly from buffer
+- Added `BytesUtils.readIntLittleEndianPaddedOnBitWidth(ByteBuffer, int)` — uses `getShort()`/`getInt()`
+  with LITTLE_ENDIAN byte order for 2-byte and 4-byte reads
+- Converted `RunLengthBitPackingHybridDecoder` constructor from `(int, InputStream)` to `(int, ByteBuffer)`
+- Replaced `in.available()` → `buffer.hasRemaining()`
+- Replaced `dataIn.readFully()` → `buffer.get(byte[], offset, len)`
+- Eliminated `DataInputStream` field entirely
+- Updated all callers:
+  - `DictionaryValuesReader.initFromPage()` — uses `in.slice(in.available())` to get ByteBuffer
+  - `RunLengthBitPackingHybridValuesReader.initFromPage()` — uses `stream.slice(length)`
+  - `ColumnReaderBase.newRLEIterator()` — uses `bytes.toByteBuffer()`
+  - Tests and benchmarks updated to use `ByteBuffer.wrap()`
+
+### Files Modified
+
+1. `parquet-common/src/main/java/org/apache/parquet/bytes/BytesUtils.java`
+2. `parquet-column/src/main/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridDecoder.java`
+3. `parquet-column/src/main/java/org/apache/parquet/column/values/dictionary/DictionaryValuesReader.java`
+4. `parquet-column/src/main/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridValuesReader.java`
+5. `parquet-column/src/main/java/org/apache/parquet/column/impl/ColumnReaderBase.java`
+6. `parquet-benchmarks/src/main/java/org/apache/parquet/benchmarks/IntEncodingBenchmark.java`
+7. `parquet-column/src/test/java/org/apache/parquet/column/values/rle/TestRunLengthBitPackingHybridEncoder.java`
+8. `parquet-column/src/test/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridIntegrationTest.java`
+
+### Results
+
+Micro-benchmark: `IntEncodingBenchmark.decodeRle` and `decodeDictionary` (100,000 values per invocation)
+
+**decodeRle:**
+
+| Pattern | Baseline (ops/s) | Optimized (ops/s) | Change |
+|---|---|---|---|
+| SEQUENTIAL | ~112M | 111,008,341 | Within noise |
+| RANDOM | ~112M | 110,154,381 | Within noise |
+| LOW_CARDINALITY | ~112M | 108,534,389 | Within noise |
+| HIGH_CARDINALITY | ~112M | 111,448,755 | Within noise |
+
+**decodeDictionary:**
+
+| Pattern | Optimized (ops/s) |
+|---|---|
+| SEQUENTIAL | 86,305,566 |
+| RANDOM | 84,826,802 |
+| LOW_CARDINALITY | 106,204,465 |
+| HIGH_CARDINALITY | 85,248,254 |
+
+**No measurable performance improvement.** The reason is that the RLE decoder's hot path is
+fundamentally different from PlainValuesReader's:
+
+- **PlainValuesReader** (12.3x improvement): Every value requires I/O — 4 `in.read()` calls per
+  INT32 value. Eliminating virtual dispatch per-value yields massive gains.
+- **RLE decoder** (no improvement): The per-value path is just a counter decrement + switch +
+  array/constant return from cached data. The I/O (`readNext()`) only happens once per RLE run
+  or packed group (every 8+ values). The InputStream overhead is amortized over many values,
+  making it negligible compared to the bit unpacking work.
+
+This is consistent with Improvements 13 and 14, which also targeted the RLE decoder with no
+measurable performance effect. The RLE decoder is not I/O-bound on the per-value path.
+
+**Value as code quality improvement:**
+- Eliminates the `InputStream` and `DataInputStream` abstraction layers
+- No more checked `IOException` in the I/O path (only unchecked `ParquetDecodingException`)
+- Consistent API with PlainValuesReader and BinaryPlainValuesReader (all use ByteBuffer)
+- Removes one layer of indirection for future JIT optimization opportunities
+
+### Tests
+
+All 573 `parquet-column` tests pass with zero failures.
+
+---
+
 ## Summary Table
 
 | # | Optimization | Module | Benchmark | Improvement |
@@ -1242,6 +1323,7 @@ All 573 `parquet-column` tests pass with zero failures.
 | 13 | RLE decoder: cache DataInputStream + forward index | parquet-column | decodeRle | **No measurable effect** (code quality) |
 | 14 | RLE decoder readInt(): remove checked IOException | parquet-column | decodeDictionary | **No measurable effect** (code quality) |
 | 15 | BinaryPlainValuesReader: direct ByteBuffer reads | parquet-column | decodePlain (binary) | **+12% to +16%** (short strings) |
+| 16 | RLE decoder: replace InputStream with ByteBuffer | parquet-column | decodeRle | **No measurable effect** (code quality) |
 
 ### Files Modified (Round 7)
 
@@ -1260,6 +1342,14 @@ All 573 `parquet-column` tests pass with zero failures.
 3. `parquet-column/src/main/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridValuesReader.java`
 4. `parquet-column/src/main/java/org/apache/parquet/column/impl/ColumnReaderBase.java`
 5. `parquet-column/src/main/java/org/apache/parquet/column/values/plain/BinaryPlainValuesReader.java`
+
+### Files Modified (Round 10)
+
+1. `parquet-common/src/main/java/org/apache/parquet/bytes/BytesUtils.java`
+2. `parquet-column/src/main/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridDecoder.java`
+3. `parquet-column/src/main/java/org/apache/parquet/column/values/dictionary/DictionaryValuesReader.java`
+4. `parquet-column/src/main/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridValuesReader.java`
+5. `parquet-column/src/main/java/org/apache/parquet/column/impl/ColumnReaderBase.java`
 
 ### Commits
 

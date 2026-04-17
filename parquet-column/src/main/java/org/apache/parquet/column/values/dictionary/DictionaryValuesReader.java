@@ -19,6 +19,7 @@
 package org.apache.parquet.column.values.dictionary;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.BytesUtils;
 import org.apache.parquet.column.Dictionary;
@@ -52,9 +53,10 @@ public class DictionaryValuesReader extends ValuesReader {
       LOG.debug("init from page at offset {} for length {}", stream.position(), stream.available());
       int bitWidth = BytesUtils.readIntLittleEndianOnOneByte(in);
       LOG.debug("bit width {}", bitWidth);
-      decoder = new RunLengthBitPackingHybridDecoder(bitWidth, in);
+      ByteBuffer buf = in.slice(in.available());
+      decoder = new RunLengthBitPackingHybridDecoder(bitWidth, buf);
     } else {
-      decoder = new RunLengthBitPackingHybridDecoder(1, in) {
+      decoder = new RunLengthBitPackingHybridDecoder(1, ByteBuffer.allocate(0)) {
         @Override
         public int readInt() {
           throw new ParquetDecodingException("Attempt to read from empty page");

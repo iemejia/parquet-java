@@ -18,7 +18,6 @@
  */
 package org.apache.parquet.benchmarks;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Random;
@@ -228,7 +227,7 @@ public class IntEncodingBenchmark {
   @OperationsPerInvocation(VALUE_COUNT)
   public void decodeRle(Blackhole bh) throws IOException {
     RunLengthBitPackingHybridDecoder decoder =
-        new RunLengthBitPackingHybridDecoder(rleBitWidth, new ByteArrayInputStream(rleEncoded));
+        new RunLengthBitPackingHybridDecoder(rleBitWidth, ByteBuffer.wrap(rleEncoded));
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(decoder.readInt());
     }
