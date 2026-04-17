@@ -1435,6 +1435,57 @@ All 573 `parquet-column` tests pass with zero failures, including all BSS-specif
 
 ---
 
+## Round 13: Page Assembly Copy Elimination
+
+### Improvement 19: BAOSBytesInput.writeInto — Eliminate Intermediate toByteArray() Copy
+
+**Hypothesis:** When pages are compressed, `HeapBytesCompressor.compress()` returns a
+`BAOSBytesInput` wrapping a `ByteArrayOutputStream`. When `ConcatenatingByteBufferCollector.collect()`
+calls `writeInto(ByteBuffer)`, the implementation did `buffer.put(arrayOut.toByteArray())` —
+allocating a full page-size byte[] copy via `Arrays.copyOf(buf, count)`, then copying it into the
+target ByteBuffer. That's 2 copies when only 1 is needed.
+
+**Fix:** Use `arrayOut.writeTo(ByteBufferBackedOutputStream)` instead, which calls
+`out.write(buf, 0, count)` directly from the internal buffer — a single `buffer.put(b, off, len)`
+memcpy. Added a thin `ByteBufferBackedOutputStream` adapter to bridge the OutputStream and ByteBuffer APIs.
+
+**Also:** Replaced `crc.update(compressedBytes.toByteArray())` in `ColumnChunkPageWriteStore` with
+streaming CRC computation via `compressedBytes.writeAllTo(CRC32OutputStream)`. This writes directly
+from each BytesInput's backing buffer into the CRC32, eliminating an additional page-size `toByteArray()`
+allocation+copy per page when CRC checksums are enabled. Applied to both V1 and V2 page paths.
+
+**What was eliminated:**
+- Per compressed page: 1 unnecessary `Arrays.copyOf(buf, count)` allocation + memcpy (~1MB per page)
+- Per CRC-enabled page (V1): 1 additional `toByteArray()` allocation + memcpy
+- Per CRC-enabled page (V2): up to 3 additional `toByteArray()` allocations + memcpys (RL, DL, data)
+
+### Files Modified
+
+1. `parquet-common/src/main/java/org/apache/parquet/bytes/BytesInput.java`
+2. `parquet-hadoop/src/main/java/org/apache/parquet/hadoop/ColumnChunkPageWriteStore.java`
+
+### Results
+
+End-to-end write benchmark: `FileWriteBenchmark.writeFile` (100,000 rows, 6-column schema)
+
+| Codec | Dict | Baseline (ms) | Optimized (ms) | Notes |
+|---|---|---|---|---|
+| UNCOMPRESSED | true | ~184 | ~188 | No BAOSBytesInput in path (NO_OP compressor) |
+| SNAPPY | true | ~201 | ~200 | Saves ~1 page-copy per page, below noise threshold |
+
+The improvement is architecturally correct but below the noise threshold of the end-to-end benchmark.
+For a 6-column, 100K-row file, the saved copies total ~6MB (one per column page). At memory
+bandwidth speeds (~10GB/s), that's ~0.6ms — within the ±8ms error bars. The benefit becomes more
+visible with larger files, more columns, or when CRC checksums are enabled.
+
+### Tests
+
+- 312 `parquet-common` tests pass (0 failures)
+- `TestCompressionCodec` (5 tests), `TestDirectCodecFactory` (4 tests), `TestSnappyCodec` (2 tests) pass
+- Pre-existing `getSubject` Hadoop failures on Java 18+ are unrelated
+
+---
+
 ## Summary Table
 
 | # | Optimization | Module | Benchmark | Improvement |
@@ -1457,6 +1508,7 @@ All 573 `parquet-column` tests pass with zero failures, including all BSS-specif
 | 16 | RLE decoder: replace InputStream with ByteBuffer | parquet-column | decodeRle | **No measurable effect** (code quality) |
 | 17 | PlainValuesWriter: direct slab writes | parquet-common | encodePlain | **+32% to +97%** |
 | 18 | BSS writer: batch scatter writes | parquet-column | encodeByteStreamSplit | **+134% to +138% (2.35x)** |
+| 19 | Page assembly: eliminate BAOSBytesInput copy + streaming CRC | parquet-common, parquet-hadoop | FileWriteBenchmark | **Code quality** (eliminates page-size alloc+copy per compressed page) |
 
 ### Files Modified (Round 7)
 
@@ -1492,6 +1544,11 @@ All 573 `parquet-column` tests pass with zero failures, including all BSS-specif
 ### Files Modified (Round 12)
 
 1. `parquet-column/src/main/java/org/apache/parquet/column/values/bytestreamsplit/ByteStreamSplitValuesWriter.java`
+
+### Files Modified (Round 13)
+
+1. `parquet-common/src/main/java/org/apache/parquet/bytes/BytesInput.java`
+2. `parquet-hadoop/src/main/java/org/apache/parquet/hadoop/ColumnChunkPageWriteStore.java`
 
 ### Commits
 
