@@ -1369,6 +1369,72 @@ All 573 `parquet-column` tests pass with zero failures.
 
 ---
 
+## Round 12: ByteStreamSplit Writer Batch Scatter
+
+### Improvement 18: ByteStreamSplitValuesWriter — Batch Scatter Writes
+
+**Hypothesis:** The BSS writer scatters each value's bytes across N separate
+`CapacityByteArrayOutputStream` instances. For a 4-byte int, each `writeInteger()` makes
+4 individual `CBOS.write(int b)` calls, each of which does a `hasRemaining()` check,
+`ByteBuffer.put((byte)b)`, and `Math.addExact(bytesUsed, 1)`. That's 12 operations per
+value. By buffering values in a batch (64 values), we can extract bytes per-stream and
+write them in one bulk `CBOS.write(byte[], off, len)` call per stream per flush. This
+replaces 4N individual single-byte writes with 4 bulk writes, where each bulk write does
+a single bounds check, a single `System.arraycopy`, and a single `addExact`.
+
+**Changes:**
+- `ByteStreamSplitValuesWriter`: Added batch buffering infrastructure:
+  - `BATCH_SIZE = 64`, `int[] intBatch`, `long[] longBatch`, `byte[] scatterBuf`,
+    `int batchCount` fields (lazily allocated on first use)
+  - `bufferInt(int v)`: stores value in batch; flushes when full
+  - `bufferLong(long v)`: stores value in batch; flushes when full
+  - `flushIntBatch()` / `flushLongBatch()`: extracts bytes per-stream into `scatterBuf`,
+    calls `byteStreams[s].write(scatterBuf, 0, count)` for each stream
+  - `flushBatch()`: dispatches to the appropriate flush method
+  - `getBytes()`: calls `flushBatch()` before returning encoded data
+  - `getBufferedSize()`: accounts for unflushed batch without triggering flush
+  - `reset()` / `close()`: resets `batchCount` to 0
+- All int/float subclasses now call `bufferInt()` instead of `scatterInt()`
+- All long/double subclasses now call `bufferLong()` instead of `scatterLong()`
+- `FixedLenByteArrayByteStreamSplitValuesWriter` still uses unbatched `scatterBytes()`
+  (variable element size, not worth batching)
+- Removed unused `BytesUtils` import
+
+**What was eliminated per value (int case, amortized over batch of 64):**
+- 4 individual `CBOS.write(int b)` calls (each: hasRemaining + put + addExact) = 12 ops
+- Replaced with: ~4 byte-extract ops + 4/64 bulk write ops ≈ 4.06 ops amortized
+
+### Files Modified
+
+1. `parquet-column/src/main/java/org/apache/parquet/column/values/bytestreamsplit/ByteStreamSplitValuesWriter.java`
+
+### Results
+
+Micro-benchmark: `IntEncodingBenchmark.encodeByteStreamSplit` (100,000 INT32 values per invocation)
+
+| Pattern | Baseline (ops/s) | Optimized (ops/s) | Improvement |
+|---|---|---|---|
+| SEQUENTIAL | ~22,600,000 | 52,936,293 | **+134% (2.3x)** |
+| RANDOM | 22,643,010 | 53,834,138 | **+138% (2.4x)** |
+| LOW_CARDINALITY | ~22,600,000 | 53,104,147 | **+135% (2.3x)** |
+| HIGH_CARDINALITY | ~22,600,000 | 53,224,791 | **+135% (2.4x)** |
+
+The improvement is consistent (~2.35x) across all data patterns, as expected: BSS encoding
+treats all values identically regardless of data distribution. The optimized BSS writer now
+matches PLAIN encoding throughput (~52.5M ops/s).
+
+Decode benchmark (`decodeByteStreamSplit`) confirmed at ~84M ops/s — encoded data is
+read-compatible (writer changes are output-transparent).
+
+### Tests
+
+All 573 `parquet-column` tests pass with zero failures, including all BSS-specific tests:
+- `ByteStreamSplitValuesWriterTest` (7 tests: Float, Double, Integer, Long, FixedLenByteArray)
+- `ByteStreamSplitValuesReaderTest` (16 tests)
+- `ByteStreamSplitValuesEndToEndTest` (5 tests)
+
+---
+
 ## Summary Table
 
 | # | Optimization | Module | Benchmark | Improvement |
@@ -1384,12 +1450,13 @@ All 573 `parquet-column` tests pass with zero failures.
 | 9 | DeltaBA reader: avoid hidden suffix copy | parquet-column | decodeDeltaByteArray | **+3.8% to +11.5%** |
 | 10 | RLE encoder: batch bit-packed groups | parquet-column | encodeDictionary | **up to +12.0%** |
 | 11 | Eager column buffer release during flush | parquet-hadoop | RowGroupFlushBenchmark | **No effect** (peak set during write phase, not flush) |
-| 12 | PlainValuesReader: direct ByteBuffer reads | parquet-column | decodePlain | **+1,130% (12.3×)** |
+| 12 | PlainValuesReader: direct ByteBuffer reads | parquet-column | decodePlain | **+1,130% (12.3x)** |
 | 13 | RLE decoder: cache DataInputStream + forward index | parquet-column | decodeRle | **No measurable effect** (code quality) |
 | 14 | RLE decoder readInt(): remove checked IOException | parquet-column | decodeDictionary | **No measurable effect** (code quality) |
 | 15 | BinaryPlainValuesReader: direct ByteBuffer reads | parquet-column | decodePlain (binary) | **+12% to +16%** (short strings) |
 | 16 | RLE decoder: replace InputStream with ByteBuffer | parquet-column | decodeRle | **No measurable effect** (code quality) |
 | 17 | PlainValuesWriter: direct slab writes | parquet-common | encodePlain | **+32% to +97%** |
+| 18 | BSS writer: batch scatter writes | parquet-column | encodeByteStreamSplit | **+134% to +138% (2.35x)** |
 
 ### Files Modified (Round 7)
 
@@ -1421,6 +1488,10 @@ All 573 `parquet-column` tests pass with zero failures.
 
 1. `parquet-common/src/main/java/org/apache/parquet/bytes/CapacityByteArrayOutputStream.java`
 2. `parquet-column/src/main/java/org/apache/parquet/column/values/plain/PlainValuesWriter.java`
+
+### Files Modified (Round 12)
+
+1. `parquet-column/src/main/java/org/apache/parquet/column/values/bytestreamsplit/ByteStreamSplitValuesWriter.java`
 
 ### Commits
 
