@@ -1654,6 +1654,77 @@ is just `decodedDataBuffer.getInt(offset)`, which is unchanged.
 
 ---
 
+## Round 17: Batch Read APIs and IntList.size() Fix
+
+### Improvement 25: IntList.size() O(1) with running counter
+
+`IntList.size()` iterated all slabs to compute the total element count. While only
+O(log N) in slabs, it was called from `getBufferedSize()` on the periodic size-check
+path. Fix: add a `totalSize` field incremented in `add()`.
+
+**Impact:** Negligible (was ~20 iterations max), but correct by construction.
+
+### Improvement 26: Batch read APIs for ValuesReader hierarchy
+
+Added `readIntegers(int[], int, int)`, `readLongs(long[], int, int)`,
+`readFloats(float[], int, int)`, `readDoubles(double[], int, int)` batch methods
+to `ValuesReader` base class with default loop implementations, plus optimized
+overrides in all major reader implementations.
+
+#### RLE Decoder batch: `readInts(int[], int, int)` — **+148% (2.5x)**
+
+The per-value `readInt()` has a branch + switch on every call (checking if we need
+to load a new run, then dispatching RLE vs PACKED mode). The batch `readInts()` loops
+within each run using `Arrays.fill()` for RLE runs and `System.arraycopy()` for
+PACKED runs, processing entire runs at once without per-value dispatch.
+
+| Data Pattern | Per-value (M ops/s) | Batch (M ops/s) | Improvement |
+|---|---|---|---|
+| SEQUENTIAL | 110 | **273** | **+148%** |
+| LOW_CARDINALITY | 111 | **272** | **+145%** |
+
+#### Dictionary Reader batch: `readIntegers(int[], int, int)` — **+42% to +67%**
+
+Batch-decodes RLE dictionary IDs via `decoder.readInts()`, then does sequential
+dictionary lookups in a tight loop. Benefits from both the RLE batch decode and
+improved cache locality on the dictionary array.
+
+| Data Pattern | Per-value (M ops/s) | Batch (M ops/s) | Improvement |
+|---|---|---|---|
+| SEQUENTIAL | 86 | **122** | **+42%** |
+| LOW_CARDINALITY | 106 | **176** | **+67%** |
+
+Low cardinality benefits more (+67%) because the encoded dictionary IDs have longer
+RLE runs, amplifying the batch RLE decode advantage.
+
+#### Plain, BSS, Delta: batch is neutral to slightly slower at micro level
+
+For readers that are already a single JVM intrinsic per value (`buffer.getInt()`,
+`buffer.getInt(offset)`, `valuesBuffer[idx++]`), the batch methods provide no speedup
+at the ValuesReader level because:
+1. No per-value control flow to eliminate (unlike RLE's switch/branch)
+2. The batch version writes to an output array (additional work the per-value
+   Blackhole-based benchmark doesn't perform)
+
+These batch methods are still correct and serve as building blocks for a higher-level
+batch ColumnReader that would skip the RecordReaderImplementation state machine.
+
+### Key Insight
+
+The real bottleneck on the read path is the `RecordReaderImplementation.read()` state
+machine, which performs 5-6 virtual dispatches per value (def level read, rep level read,
+binding.read(), binding.writeValue(), FSA state transition, group converter calls).
+Batch APIs at the ValuesReader level are building blocks — the full benefit requires
+a Level B batch reader at the ColumnReader/RecordReader level that would process N rows
+at a time, batching the def/rep level reads AND value reads for flat schemas.
+
+### Tests
+
+- 573 parquet-column tests pass (0 failures)
+- 312+ parquet-common tests pass (0 failures)
+
+---
+
 ## Summary Table
 
 | # | Optimization | Module | Benchmark | Improvement |
@@ -1682,6 +1753,8 @@ is just `decodedDataBuffer.getInt(offset)`, which is unchanged.
 | 22 | FixedLenByteArrayPlainValuesWriter: eliminate LE wrapper | parquet-column | — | Code quality (same pattern as #21) |
 | 23 | Dictionary writers: OpenHashMap + ArrayList | parquet-column | encodeDictionary (binary) | **+23% to +42%** (high cardinality) |
 | 24 | BSS reader: array-based single-pass decode | parquet-column | decodeByteStreamSplit | **+102% to +108% (2x)** |
+| 25 | IntList.size(): O(1) with running counter | parquet-column | — | Code quality (trivial fix) |
+| 26 | Batch read APIs: ValuesReader hierarchy | parquet-column | decodeRle, decodeDictionary | **RLE +148%, Dict +42% to +67%** |
 
 ### Files Modified (Round 7)
 
@@ -1737,6 +1810,20 @@ is just `decodedDataBuffer.getInt(offset)`, which is unchanged.
 
 1. `parquet-column/src/main/java/org/apache/parquet/column/values/bytestreamsplit/ByteStreamSplitValuesReader.java`
 
+### Files Modified (Round 17)
+
+1. `parquet-column/src/main/java/org/apache/parquet/column/values/ValuesReader.java`
+2. `parquet-column/src/main/java/org/apache/parquet/column/values/plain/PlainValuesReader.java`
+3. `parquet-column/src/main/java/org/apache/parquet/column/values/delta/DeltaBinaryPackingValuesReader.java`
+4. `parquet-column/src/main/java/org/apache/parquet/column/values/bytestreamsplit/ByteStreamSplitValuesReader.java`
+5. `parquet-column/src/main/java/org/apache/parquet/column/values/bytestreamsplit/ByteStreamSplitValuesReaderForInteger.java`
+6. `parquet-column/src/main/java/org/apache/parquet/column/values/bytestreamsplit/ByteStreamSplitValuesReaderForFloat.java`
+7. `parquet-column/src/main/java/org/apache/parquet/column/values/bytestreamsplit/ByteStreamSplitValuesReaderForDouble.java`
+8. `parquet-column/src/main/java/org/apache/parquet/column/values/bytestreamsplit/ByteStreamSplitValuesReaderForLong.java`
+9. `parquet-column/src/main/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridDecoder.java`
+10. `parquet-column/src/main/java/org/apache/parquet/column/values/dictionary/DictionaryValuesReader.java`
+11. `parquet-column/src/main/java/org/apache/parquet/column/values/dictionary/IntList.java`
+
 ## End-to-End Benchmark Comparison
 
 Baseline: commit `375ffec30` (pre-optimization, benchmark module merged).
@@ -1789,6 +1876,9 @@ because encoding/decoding is a larger fraction of total time.
 ### Commits
 
 ```
+d442d5e68 Add batch read APIs to ValuesReader hierarchy: RLE +148%, Dictionary +67%
+9ebe208e2 Optimize IntList.size() from O(slabs) to O(1) with running counter
+96671b62c Document end-to-end benchmark comparison: baseline vs optimized (read -5-10%, write -10-14%)
 916a632ea Optimize ByteStreamSplit decode: array-based single-pass transpose (2x throughput)
 2a8463623 Optimize dictionary writers: replace LinkedOpenHashMap with OpenHashMap + ArrayList (+23-42% high cardinality)
 abea051ad Optimize delta binary writers: eliminate per-value allocation and LE wrapper (+23-33%)
