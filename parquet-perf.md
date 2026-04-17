@@ -1486,6 +1486,71 @@ visible with larger files, more columns, or when CRC checksums are enabled.
 
 ---
 
+## Round 14: Delta Binary Writers — Eliminate Per-Value Allocations and LE Wrapper
+
+### Improvement 20: DeltaByteArrayWriter — Avoid Binary.slice() Allocation Per Value
+
+**Hypothesis:** In `DeltaByteArrayWriter.writeBytes()`, after computing the prefix length, the suffix
+was written via `suffixWriter.writeBytes(v.slice(i, vb.length - i))`. This creates a new
+`ByteArraySliceBackedBinary` object per value just to pass to the suffix writer, which then calls
+`v.writeTo(out)` → `LittleEndianDataOutputStream.write(byte[], off, len)` → `CBOS.write(byte[], off, len)`.
+That's one object allocation + three virtual dispatches for what should be a single `write(byte[], off, len)`.
+
+**Fix:** Changed `suffixWriter` field type from `ValuesWriter` to `DeltaLengthByteArrayValuesWriter`
+and added a `writeBytes(byte[] data, int offset, int length)` method that writes directly to the
+underlying `CapacityByteArrayOutputStream`. The suffix is now written as
+`suffixWriter.writeBytes(vb, i, vb.length - i)` — no Binary object, no virtual dispatch chain.
+
+### Improvement 21: DeltaLengthByteArrayValuesWriter — Eliminate LittleEndianDataOutputStream Wrapper
+
+**Hypothesis:** `DeltaLengthByteArrayValuesWriter` wrapped its `CapacityByteArrayOutputStream` with a
+`LittleEndianDataOutputStream`, but only ever used `write()` methods (raw byte writes), never any of
+the typed LE methods (writeInt, writeLong, etc.). The wrapper added an extra virtual dispatch per
+`Binary.writeTo()` call with zero benefit.
+
+**Fix:** Removed the `LittleEndianDataOutputStream` wrapper entirely. `Binary.writeTo()` now writes
+directly to `CapacityByteArrayOutputStream`. Also removed the unnecessary `out.flush()` call from
+`getBytes()` — CBOS has no internal buffering, so flush is a no-op.
+
+### Files Modified
+
+1. `parquet-column/src/main/java/org/apache/parquet/column/values/deltastrings/DeltaByteArrayWriter.java`
+2. `parquet-column/src/main/java/org/apache/parquet/column/values/deltalengthbytearray/DeltaLengthByteArrayValuesWriter.java`
+
+### Results
+
+**DELTA_BYTE_ARRAY encode** (improvements 20+21 combined):
+
+| Cardinality | String Length | Baseline (ops/s) | Optimized (ops/s) | Change |
+|---|---|---|---|---|
+| LOW | 10 | 11,840,824 ± 662K | 15,772,113 ± 1.06M | **+33%** |
+| LOW | 100 | 5,851,912 ± 457K | 6,111,386 ± 139K | +4.4% |
+| LOW | 1000 | 824,232 ± 22K | 842,363 ± 41K | +2.2% |
+| HIGH | 10 | 11,226,335 ± 538K | 13,810,861 ± 897K | **+23%** |
+| HIGH | 100 | 5,071,629 ± 106K | 5,200,847 ± 133K | +2.5% |
+| HIGH | 1000 | 685,307 ± 47K | 693,171 ± 72K | +1.1% |
+
+**DELTA_LENGTH_BYTE_ARRAY encode** (improvement 21 only — LE wrapper removal):
+
+| Cardinality | String Length | Baseline (ops/s) | Optimized (ops/s) | Change |
+|---|---|---|---|---|
+| LOW | 10 | 21,949,079 ± 363K | 25,432,103 ± 291K | **+16%** |
+| LOW | 100 | 6,897,990 ± 185K | 7,266,852 ± 370K | +5.3% |
+| LOW | 1000 | 851,717 ± 46K | 856,046 ± 75K | ~0% |
+| HIGH | 10 | 19,637,128 ± 1.62M | 23,206,164 ± 1.37M | **+18%** |
+| HIGH | 100 | 5,702,644 ± 113K | 5,925,859 ± 127K | +3.9% |
+| HIGH | 1000 | 679,132 ± 60K | 708,894 ± 16K | +4.4% |
+
+The biggest gains are for short strings where per-value overhead (object allocation + virtual dispatch
+chain) is a larger fraction of the total work. For 10-byte strings, eliminating the Binary.slice()
+allocation and the LEDO dispatch chain yields 23-33% improvement. Decode benchmarks are unaffected.
+
+### Tests
+
+- 23 tests pass: 6 DeltaByteArray + 13 DeltaLengthByteArray + 4 benchmarks (0 failures)
+
+---
+
 ## Summary Table
 
 | # | Optimization | Module | Benchmark | Improvement |
@@ -1509,6 +1574,8 @@ visible with larger files, more columns, or when CRC checksums are enabled.
 | 17 | PlainValuesWriter: direct slab writes | parquet-common | encodePlain | **+32% to +97%** |
 | 18 | BSS writer: batch scatter writes | parquet-column | encodeByteStreamSplit | **+134% to +138% (2.35x)** |
 | 19 | Page assembly: eliminate BAOSBytesInput copy + streaming CRC | parquet-common, parquet-hadoop | FileWriteBenchmark | **Code quality** (eliminates page-size alloc+copy per compressed page) |
+| 20 | DeltaByteArrayWriter: avoid Binary.slice() per value | parquet-column | encodeDeltaByteArray | **+23% to +33%** (short strings) |
+| 21 | DeltaLengthByteArrayValuesWriter: eliminate LE wrapper | parquet-column | encodeDeltaLengthByteArray | **+16% to +18%** (short strings) |
 
 ### Files Modified (Round 7)
 
@@ -1549,6 +1616,11 @@ visible with larger files, more columns, or when CRC checksums are enabled.
 
 1. `parquet-common/src/main/java/org/apache/parquet/bytes/BytesInput.java`
 2. `parquet-hadoop/src/main/java/org/apache/parquet/hadoop/ColumnChunkPageWriteStore.java`
+
+### Files Modified (Round 14)
+
+1. `parquet-column/src/main/java/org/apache/parquet/column/values/deltastrings/DeltaByteArrayWriter.java`
+2. `parquet-column/src/main/java/org/apache/parquet/column/values/deltalengthbytearray/DeltaLengthByteArrayValuesWriter.java`
 
 ### Commits
 
