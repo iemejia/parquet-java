@@ -242,4 +242,58 @@ public class IntEncodingBenchmark {
       bh.consume(reader.readInteger());
     }
   }
+
+  // ---- Batch decode benchmarks ----
+  // These measure the throughput of reading all values at once into an array,
+  // bypassing per-value virtual dispatch. Compares against the per-value benchmarks above.
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public int[] decodePlainBatch() throws IOException {
+    PlainValuesReader.IntegerPlainValuesReader reader = new PlainValuesReader.IntegerPlainValuesReader();
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(plainEncoded)));
+    int[] result = new int[VALUE_COUNT];
+    reader.readIntegers(result, 0, VALUE_COUNT);
+    return result;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public int[] decodeDeltaBatch() throws IOException {
+    DeltaBinaryPackingValuesReader reader = new DeltaBinaryPackingValuesReader();
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(deltaEncoded)));
+    int[] result = new int[VALUE_COUNT];
+    reader.readIntegers(result, 0, VALUE_COUNT);
+    return result;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public int[] decodeByteStreamSplitBatch() throws IOException {
+    ByteStreamSplitValuesReaderForInteger reader = new ByteStreamSplitValuesReaderForInteger();
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(bssEncoded)));
+    int[] result = new int[VALUE_COUNT];
+    reader.readIntegers(result, 0, VALUE_COUNT);
+    return result;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public int[] decodeRleBatch() throws IOException {
+    RunLengthBitPackingHybridDecoder decoder =
+        new RunLengthBitPackingHybridDecoder(rleBitWidth, ByteBuffer.wrap(rleEncoded));
+    int[] result = new int[VALUE_COUNT];
+    decoder.readInts(result, 0, VALUE_COUNT);
+    return result;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public int[] decodeDictionaryBatch() throws IOException {
+    DictionaryValuesReader reader = new DictionaryValuesReader(intDictionary);
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(dictDataEncoded)));
+    int[] result = new int[VALUE_COUNT];
+    reader.readIntegers(result, 0, VALUE_COUNT);
+    return result;
+  }
 }

@@ -49,6 +49,19 @@ public abstract class ByteStreamSplitValuesReader extends ValuesReader {
     return offset;
   }
 
+  /**
+   * Advances the stream position by {@code count} elements and returns the byte offset
+   * of the first element. Used by batch read methods in subclasses.
+   */
+  protected int advanceByteOffset(int count) {
+    if (indexInStream + count > valuesCount) {
+      throw new ParquetDecodingException("Byte-stream data was already exhausted.");
+    }
+    int offset = indexInStream * elementSizeInBytes;
+    indexInStream += count;
+    return offset;
+  }
+
   // Decode an entire data page by transposing from stream-split layout to interleaved layout.
   // The encoded data has elementSizeInBytes separate streams of valuesCount bytes each.
   // The decoded data has valuesCount elements of elementSizeInBytes bytes each.

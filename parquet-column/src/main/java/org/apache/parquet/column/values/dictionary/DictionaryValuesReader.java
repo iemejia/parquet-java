@@ -96,6 +96,43 @@ public class DictionaryValuesReader extends ValuesReader {
   }
 
   @Override
+  public void readIntegers(int[] dest, int offset, int count) {
+    // Batch-decode dictionary IDs, then batch-lookup
+    int[] ids = new int[count];
+    decoder.readInts(ids, 0, count);
+    for (int i = 0; i < count; i++) {
+      dest[offset + i] = dictionary.decodeToInt(ids[i]);
+    }
+  }
+
+  @Override
+  public void readLongs(long[] dest, int offset, int count) {
+    int[] ids = new int[count];
+    decoder.readInts(ids, 0, count);
+    for (int i = 0; i < count; i++) {
+      dest[offset + i] = dictionary.decodeToLong(ids[i]);
+    }
+  }
+
+  @Override
+  public void readFloats(float[] dest, int offset, int count) {
+    int[] ids = new int[count];
+    decoder.readInts(ids, 0, count);
+    for (int i = 0; i < count; i++) {
+      dest[offset + i] = dictionary.decodeToFloat(ids[i]);
+    }
+  }
+
+  @Override
+  public void readDoubles(double[] dest, int offset, int count) {
+    int[] ids = new int[count];
+    decoder.readInts(ids, 0, count);
+    for (int i = 0; i < count; i++) {
+      dest[offset + i] = dictionary.decodeToDouble(ids[i]);
+    }
+  }
+
+  @Override
   public void skip() {
     decoder.readInt(); // Type does not matter as we are just skipping dictionary keys
   }
