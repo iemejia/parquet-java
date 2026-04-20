@@ -33,8 +33,11 @@ import org.apache.parquet.example.data.simple.SimpleGroupFactory;
 import org.apache.parquet.hadoop.ParquetFileWriter.Mode;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.example.ExampleParquetWriter;
+import org.apache.parquet.io.OutputFile;
+import org.apache.parquet.io.PositionOutputStream;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Types;
+import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
 import org.openjdk.jmh.annotations.Measurement;
@@ -85,6 +88,44 @@ public class NestedNullWritingBenchmarks {
       .named("msg");
   private static final int RECORD_COUNT = 10_000_000;
   private static final double NULL_RATIO = 0.99;
+  private static final OutputFile BLACK_HOLE = new OutputFile() {
+    @Override
+    public boolean supportsBlockSize() {
+      return false;
+    }
+
+    @Override
+    public long defaultBlockSize() {
+      return -1L;
+    }
+
+    @Override
+    public PositionOutputStream createOrOverwrite(long blockSizeHint) {
+      return create(blockSizeHint);
+    }
+
+    @Override
+    public PositionOutputStream create(long blockSizeHint) {
+      return new PositionOutputStream() {
+        private long pos;
+
+        @Override
+        public long getPos() throws IOException {
+          return pos;
+        }
+
+        @Override
+        public void write(int b) throws IOException {
+          ++pos;
+        }
+      };
+    }
+
+    @Override
+    public String getPath() {
+      throw new UnsupportedOperationException();
+    }
+  };
 
   private static class ValueGenerator {
     private static final GroupFactory FACTORY = new SimpleGroupFactory(SCHEMA);
@@ -102,10 +143,10 @@ public class NestedNullWritingBenchmarks {
     }
   }
 
-  @org.openjdk.jmh.annotations.Benchmark
+  @Benchmark
   public void benchmarkWriting() throws IOException {
     ValueGenerator generator = new ValueGenerator();
-    try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(BlackHoleOutputFile.INSTANCE)
+    try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(BLACK_HOLE)
         .withWriteMode(Mode.OVERWRITE)
         .withType(SCHEMA)
         .build()) {

@@ -67,7 +67,9 @@ import org.openjdk.jmh.annotations.Warmup;
  * filesystem I/O.
  */
 @BenchmarkMode({Mode.AverageTime})
-@Fork(value = 1, jvmArgs = {"-Xms512m", "-Xmx1g"})
+@Fork(
+    value = 1,
+    jvmArgs = {"-Xms512m", "-Xmx1g"})
 @Warmup(iterations = 2)
 @Measurement(iterations = 3)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)

@@ -20,10 +20,8 @@ package org.apache.parquet.benchmarks;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import org.apache.parquet.example.data.Group;
-import org.apache.parquet.example.data.simple.SimpleGroupFactory;
 import org.apache.parquet.hadoop.ParquetFileWriter;
 import org.apache.parquet.hadoop.ParquetReader;
 import org.apache.parquet.hadoop.ParquetWriter;
@@ -49,17 +47,27 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Multi-threaded benchmarks to validate that read and write operations perform correctly
- * under concurrency. Uses {@code @Threads(4)} by default (overridable via JMH {@code -t} flag).
+ * Multi-threaded benchmarks measuring independent read and write throughput under
+ * concurrency. Uses {@code @Threads(4)} by default (overridable via JMH {@code -t} flag).
+ *
+ * <p>This benchmark does not assert correctness; it measures the cost of each thread
+ * writing a full file to a stateless sink or reading a shared pre-generated file.
+ * The set of rows used by {@link #concurrentWrite(Blackhole)} is built once during
+ * setup and shared (read-only) across all threads, so the timed section measures
+ * the encoder/serializer pipeline rather than per-row data construction.
  *
  * <ul>
- *   <li>{@link #concurrentWrite()} - each thread independently writes to a shared
- *       {@link BlackHoleOutputFile} (stateless sink)</li>
+ *   <li>{@link #concurrentWrite(Blackhole)} - each thread independently writes the
+ *       shared pre-generated rows to a {@link BlackHoleOutputFile} (stateless sink)</li>
  *   <li>{@link #concurrentRead(Blackhole)} - each thread independently reads the same
  *       pre-generated Parquet file</li>
  * </ul>
+ *
+ * <p>{@link Mode#SingleShotTime} is used because each invocation does enough work
+ * (a full file write or read of {@value TestDataFactory#DEFAULT_ROW_COUNT} rows)
+ * that JIT amortization across invocations is unnecessary.
  */
-@BenchmarkMode({Mode.SingleShotTime, Mode.AverageTime})
+@BenchmarkMode(Mode.SingleShotTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @Fork(1)
 @Warmup(iterations = 2, batchSize = 1)
@@ -69,23 +77,24 @@ import org.openjdk.jmh.infra.Blackhole;
 public class ConcurrentReadWriteBenchmark {
 
   private File tempFile;
+  private Group[] rows;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
+    rows = TestDataFactory.generateRows(
+        TestDataFactory.newGroupFactory(), TestDataFactory.DEFAULT_ROW_COUNT, TestDataFactory.DEFAULT_SEED);
+
     // Generate a shared file for concurrent reads
     tempFile = File.createTempFile("parquet-concurrent-bench-", ".parquet");
     tempFile.deleteOnExit();
     tempFile.delete();
 
-    SimpleGroupFactory factory = TestDataFactory.newGroupFactory();
-    Random random = new Random(42);
-    try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(
-            new LocalOutputFile(tempFile.toPath()))
+    try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(new LocalOutputFile(tempFile.toPath()))
         .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
         .withType(TestDataFactory.FILE_BENCHMARK_SCHEMA)
         .build()) {
-      for (int i = 0; i < TestDataFactory.DEFAULT_ROW_COUNT; i++) {
-        writer.write(TestDataFactory.generateRow(factory, i, random));
+      for (Group row : rows) {
+        writer.write(row);
       }
     }
   }
@@ -98,21 +107,20 @@ public class ConcurrentReadWriteBenchmark {
   }
 
   /**
-   * Each thread writes a full file independently to the shared stateless
-   * {@link BlackHoleOutputFile} sink.
+   * Each thread writes the shared pre-generated rows independently to the
+   * stateless {@link BlackHoleOutputFile} sink.
    */
   @Benchmark
-  public void concurrentWrite() throws IOException {
-    SimpleGroupFactory factory = TestDataFactory.newGroupFactory();
-    Random random = new Random(Thread.currentThread().getId());
+  public void concurrentWrite(Blackhole bh) throws IOException {
     try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(BlackHoleOutputFile.INSTANCE)
         .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
         .withType(TestDataFactory.FILE_BENCHMARK_SCHEMA)
         .build()) {
-      for (int i = 0; i < TestDataFactory.DEFAULT_ROW_COUNT; i++) {
-        writer.write(TestDataFactory.generateRow(factory, i, random));
+      for (Group row : rows) {
+        writer.write(row);
       }
     }
+    bh.consume(rows);
   }
 
   /**

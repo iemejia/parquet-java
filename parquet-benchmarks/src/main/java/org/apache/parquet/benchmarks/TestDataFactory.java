@@ -25,6 +25,7 @@ import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.FLOAT;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT32;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Random;
 import org.apache.parquet.example.data.Group;
 import org.apache.parquet.example.data.simple.SimpleGroupFactory;
@@ -43,14 +44,23 @@ public final class TestDataFactory {
   /** Number of distinct values for low-cardinality data patterns. */
   public static final int LOW_CARDINALITY_DISTINCT = 100;
 
+  /** Default RNG seed used across benchmarks for deterministic data. */
+  public static final long DEFAULT_SEED = 42L;
+
   /** A standard multi-type schema used by file-level benchmarks. */
   public static final MessageType FILE_BENCHMARK_SCHEMA = Types.buildMessage()
-      .required(INT32).named("int32_field")
-      .required(INT64).named("int64_field")
-      .required(FLOAT).named("float_field")
-      .required(DOUBLE).named("double_field")
-      .required(BOOLEAN).named("boolean_field")
-      .required(BINARY).named("binary_field")
+      .required(INT32)
+      .named("int32_field")
+      .required(INT64)
+      .named("int64_field")
+      .required(FLOAT)
+      .named("float_field")
+      .required(DOUBLE)
+      .named("double_field")
+      .required(BOOLEAN)
+      .named("boolean_field")
+      .required(BINARY)
+      .named("binary_field")
       .named("benchmark_record");
 
   private TestDataFactory() {}
@@ -80,6 +90,18 @@ public final class TestDataFactory {
         .append("binary_field", "value_" + (index % 1000));
   }
 
+  /**
+   * Generates a deterministic set of rows for file-level benchmarks.
+   */
+  public static Group[] generateRows(SimpleGroupFactory factory, int rowCount, long seed) {
+    Group[] rows = new Group[rowCount];
+    Random random = new Random(seed);
+    for (int i = 0; i < rowCount; i++) {
+      rows[i] = generateRow(factory, i, random);
+    }
+    return rows;
+  }
+
   // ---- Integer data generation for encoding benchmarks ----
 
   /**
@@ -94,7 +116,17 @@ public final class TestDataFactory {
   }
 
   /**
+   * Generates uniformly random integers using the given seed.
+   */
+  public static int[] generateRandomInts(int count, long seed) {
+    return generateRandomInts(count, new Random(seed));
+  }
+
+  /**
    * Generates uniformly random integers.
+   *
+   * <p>Note: prefer {@link #generateRandomInts(int, long)} when call ordering between
+   * generators in the same setup must not influence the produced data.
    */
   public static int[] generateRandomInts(int count, Random random) {
     int[] data = new int[count];
@@ -102,6 +134,13 @@ public final class TestDataFactory {
       data[i] = random.nextInt();
     }
     return data;
+  }
+
+  /**
+   * Generates low-cardinality integers (values drawn from a small set) using the given seed.
+   */
+  public static int[] generateLowCardinalityInts(int count, int distinctValues, long seed) {
+    return generateLowCardinalityInts(count, distinctValues, new Random(seed));
   }
 
   /**
@@ -116,17 +155,35 @@ public final class TestDataFactory {
   }
 
   /**
-   * Generates high-cardinality integers (all unique).
+   * Generates high-cardinality integers (all unique in randomized order) using the given seed.
    */
-  public static int[] generateHighCardinalityInts(int count) {
-    int[] data = new int[count];
-    for (int i = 0; i < count; i++) {
-      data[i] = i;
+  public static int[] generateHighCardinalityInts(int count, long seed) {
+    return generateHighCardinalityInts(count, new Random(seed));
+  }
+
+  /**
+   * Generates high-cardinality integers (all unique in randomized order).
+   */
+  public static int[] generateHighCardinalityInts(int count, Random random) {
+    int[] data = generateSequentialInts(count);
+    for (int i = count - 1; i > 0; i--) {
+      int swapIndex = random.nextInt(i + 1);
+      int tmp = data[i];
+      data[i] = data[swapIndex];
+      data[swapIndex] = tmp;
     }
     return data;
   }
 
   // ---- Binary data generation for encoding benchmarks ----
+
+  /**
+   * Generates binary strings of the given length with the specified cardinality, using
+   * a deterministic seed.
+   */
+  public static Binary[] generateBinaryData(int count, int stringLength, int distinct, long seed) {
+    return generateBinaryData(count, stringLength, distinct, new Random(seed));
+  }
 
   /**
    * Generates binary strings of the given length with the specified cardinality.
@@ -143,7 +200,8 @@ public final class TestDataFactory {
       // Pre-generate the distinct values
       Binary[] dictionary = new Binary[distinct];
       for (int i = 0; i < distinct; i++) {
-        dictionary[i] = Binary.fromConstantByteArray(randomString(stringLength, random).getBytes());
+        dictionary[i] = Binary.fromConstantByteArray(
+            randomString(stringLength, random).getBytes(StandardCharsets.UTF_8));
       }
       for (int i = 0; i < count; i++) {
         data[i] = dictionary[random.nextInt(distinct)];
@@ -151,7 +209,8 @@ public final class TestDataFactory {
     } else {
       // All unique
       for (int i = 0; i < count; i++) {
-        data[i] = Binary.fromConstantByteArray(randomString(stringLength, random).getBytes());
+        data[i] = Binary.fromConstantByteArray(
+            randomString(stringLength, random).getBytes(StandardCharsets.UTF_8));
       }
     }
     return data;

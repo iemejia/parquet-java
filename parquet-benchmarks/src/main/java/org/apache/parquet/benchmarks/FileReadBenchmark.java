@@ -20,11 +20,9 @@ package org.apache.parquet.benchmarks;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import org.apache.parquet.column.ParquetProperties.WriterVersion;
 import org.apache.parquet.example.data.Group;
-import org.apache.parquet.example.data.simple.SimpleGroupFactory;
 import org.apache.parquet.hadoop.ParquetFileWriter;
 import org.apache.parquet.hadoop.ParquetReader;
 import org.apache.parquet.hadoop.ParquetWriter;
@@ -51,13 +49,20 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * File-level read benchmarks measuring throughput of the full Parquet read pipeline.
- * A temporary file is generated during setup using {@link LocalOutputFile} (no Hadoop FS
- * overhead on write side), then read repeatedly during the benchmark.
+ * File-level read benchmarks measuring end-to-end Parquet read throughput through the
+ * example {@link Group} API. A temporary file is generated once during setup from
+ * pre-generated rows using {@link LocalOutputFile}, then read repeatedly during the
+ * benchmark.
  *
- * <p>Parameterized across compression codec and writer version.
+ * <p>Parameterized across compression codec and writer version. The footer parse
+ * (via {@link LocalInputFile} open) is included in the timed section so the result
+ * reflects the full open-and-read cost a typical caller would observe.
+ *
+ * <p>{@link Mode#SingleShotTime} is used because each invocation does enough work
+ * (a full read of {@value TestDataFactory#DEFAULT_ROW_COUNT} rows) that JIT
+ * amortization across invocations is unnecessary.
  */
-@BenchmarkMode({Mode.SingleShotTime, Mode.AverageTime})
+@BenchmarkMode(Mode.SingleShotTime)
 @Fork(1)
 @Warmup(iterations = 3, batchSize = 1)
 @Measurement(iterations = 5, batchSize = 1)
@@ -79,18 +84,17 @@ public class FileReadBenchmark {
     tempFile.deleteOnExit();
     tempFile.delete(); // remove so the writer can create it
 
-    SimpleGroupFactory factory = TestDataFactory.newGroupFactory();
-    Random random = new Random(42);
-    try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(
-            new LocalOutputFile(tempFile.toPath()))
+    Group[] rows = TestDataFactory.generateRows(
+        TestDataFactory.newGroupFactory(), TestDataFactory.DEFAULT_ROW_COUNT, TestDataFactory.DEFAULT_SEED);
+    try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(new LocalOutputFile(tempFile.toPath()))
         .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
         .withType(TestDataFactory.FILE_BENCHMARK_SCHEMA)
         .withCompressionCodec(CompressionCodecName.valueOf(codec))
         .withWriterVersion(WriterVersion.valueOf(writerVersion))
         .withDictionaryEncoding(true)
         .build()) {
-      for (int i = 0; i < TestDataFactory.DEFAULT_ROW_COUNT; i++) {
-        writer.write(TestDataFactory.generateRow(factory, i, random));
+      for (Group row : rows) {
+        writer.write(row);
       }
     }
   }
