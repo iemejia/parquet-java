@@ -1725,6 +1725,84 @@ at a time, batching the def/rep level reads AND value reads for flat schemas.
 
 ---
 
+## Round 18: Bit-Packing Hot Path Cleanup
+
+Focused deep-dive on the bit-packing infrastructure (`BytePacker`, `BytePackerForLong`,
+`ByteBitPackingLE`, `Packer.LITTLE_ENDIAN`) and its hot-path call sites. Two
+optimizations applied; one big win on long-delta decode, one symmetric code-quality
+improvement.
+
+### Improvement 27: DeltaBinaryPackingValuesReader.unpackMiniBlock — cache packer, batch unpack32, eliminate slice allocation
+
+`DeltaBinaryPackingValuesReader.unpackMiniBlock` had three compounding inefficiencies
+in its hot loop:
+
+1. **Per-miniblock `ByteBuffer.slice()` allocation** at line 169
+2. **ByteBuffer-form unpacker** at line 177 (slower than byte[] form per the comment
+   in `ByteBitPackingValuesReader.java:59` — confirmed by isolated benchmark)
+3. **Per-miniblock `Packer.LITTLE_ENDIAN.newBytePackerForLong()` factory lookup** at line 149
+4. **`unpack8Values` in inner loop** instead of single `unpack32Values` call
+
+Rewrite:
+- Read miniblock bytes once into a reusable `byte[] miniBlockByteBuffer` field via
+  `in.read(buf, 0, n)` instead of `in.slice(n)`
+- Use `unpack32Values(byte[], ...)` for full 32-value chunks; fall back to
+  `unpack8Values` for residuals
+- Cache `BytePackerForLong` instances in a `BytePackerForLong[65] packerCache` field
+  indexed by bit width
+
+**LongDeltaDecodingBenchmark (new, 5 iter × 1 fork):**
+
+| Data Pattern | Baseline (M ops/s) | Optimized (M ops/s) | Improvement |
+|---|---|---|---|
+| TIMESTAMP_MILLIS | — | — | **+19.9%** |
+| RANDOM_SMALL | — | — | **+14.5%** |
+| SEQUENTIAL_DENSE | — | — | +2-3% |
+| SEQUENTIAL_STRIDED | — | — | +2-3% |
+| RANDOM_WIDE | — | — | within noise |
+
+**IntEncodingBenchmark.decodeDelta:**
+
+| Data Pattern | Improvement |
+|---|---|
+| HIGH_CARDINALITY | **+20.4%** |
+| LOW_CARDINALITY | **+18.4%** |
+| RANDOM | **+12.8%** |
+| SEQUENTIAL | +3.4% |
+
+### Improvement 28: RLE hybrid decoder PACKED branch — use unpack32Values
+
+Symmetric to the encoder's existing `pack32Values` fast path (commit `1c8b46c40`,
+Round 6 / Improvement 10), the decoder's PACKED branch was looping `unpack8Values`
+four times per 32-value group. Rewrite to batch 4 groups (32 values) into a single
+`unpack32Values` call, with `unpack8Values` fallback for residual <4-group tails.
+
+Effect on `RleDictionaryIndexDecodingBenchmark` is within noise (the benchmark
+exercises mostly short PACKED runs); kept as a code-quality improvement that mirrors
+the encoder structure and benefits long PACKED runs (≥32 values).
+
+### Surprising Finding: BitPackingBenchmark
+
+A new isolated `BitPackingBenchmark` was added to characterize the packer surface
+(12 cells: `{int, long} × {byte[], ByteBuffer-heap, ByteBuffer-direct} × {unpack8,
+unpack32}` over bit widths {1, 4, 7, 8, 10, 16, 24, 32}). Two findings:
+
+1. **`unpack32 > unpack8` is NOT the dominant factor** — the byte[] forms of `unpack8`
+   and `unpack32` are roughly tied at most bit widths in isolation. Round 18's
+   delta-decode gain came primarily from **eliminating `ByteBuffer.slice()`
+   allocation** and **caching the packer**, not from the unpack32 batch itself.
+2. **Direct ByteBuffer is ~10× slower than heap ByteBuffer at certain bit widths**
+   (e.g. bw=10/32) — likely a JIT bimorphic-inlining cliff. Production code paths
+   use heap-backed buffers, so this is not a hot issue, but it documents an avoid
+   pattern.
+
+### Tests
+
+- 573 parquet-column tests pass (0 failures)
+- Targeted suites: 52 tests including 100K-round random Delta tests pass
+
+---
+
 ## Summary Table
 
 | # | Optimization | Module | Benchmark | Improvement |
@@ -1755,6 +1833,8 @@ at a time, batching the def/rep level reads AND value reads for flat schemas.
 | 24 | BSS reader: array-based single-pass decode | parquet-column | decodeByteStreamSplit | **+102% to +108% (2x)** |
 | 25 | IntList.size(): O(1) with running counter | parquet-column | — | Code quality (trivial fix) |
 | 26 | Batch read APIs: ValuesReader hierarchy | parquet-column | decodeRle, decodeDictionary | **RLE +148%, Dict +42% to +67%** |
+| 27 | Delta decode: cache packer, batch unpack32, no slice | parquet-column | decodeDeltaLong, decodeDelta | **+12% to +20%** (TIMESTAMP_MILLIS, RANDOM, HIGH/LOW_CARDINALITY) |
+| 28 | RLE decoder: unpack32Values in PACKED branch | parquet-column | decodeRle | Code quality (symmetric to Round 6 encoder) |
 
 ### Files Modified (Round 7)
 
@@ -1824,6 +1904,13 @@ at a time, batching the def/rep level reads AND value reads for flat schemas.
 10. `parquet-column/src/main/java/org/apache/parquet/column/values/dictionary/DictionaryValuesReader.java`
 11. `parquet-column/src/main/java/org/apache/parquet/column/values/dictionary/IntList.java`
 
+### Files Modified (Round 18)
+
+1. `parquet-column/src/main/java/org/apache/parquet/column/values/delta/DeltaBinaryPackingValuesReader.java`
+2. `parquet-column/src/main/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridDecoder.java`
+3. `parquet-benchmarks/src/main/java/org/apache/parquet/benchmarks/LongDeltaDecodingBenchmark.java` (new)
+4. `parquet-benchmarks/src/main/java/org/apache/parquet/benchmarks/BitPackingBenchmark.java` (new)
+
 ## End-to-End Benchmark Comparison
 
 Baseline: commit `375ffec30` (pre-optimization, benchmark module merged).
@@ -1876,6 +1963,8 @@ because encoding/decoding is a larger fraction of total time.
 ### Commits
 
 ```
+d9a0a0fc9 Use unpack32Values in RLE hybrid decoder PACKED branch
+9c14a33c6 Optimize delta binary decode: cache packer, batch unpack32, eliminate slice allocation
 d442d5e68 Add batch read APIs to ValuesReader hierarchy: RLE +148%, Dictionary +67%
 9ebe208e2 Optimize IntList.size() from O(slabs) to O(1) with running counter
 96671b62c Document end-to-end benchmark comparison: baseline vs optimized (read -5-10%, write -10-14%)
@@ -1975,3 +2064,4 @@ merging is not per-value.
 - **Page-level copy elimination** — Done (BAOSBytesInput + streaming CRC)
 - **Dictionary writers** — All use OpenHashMap + ArrayList
 - **Batch ValuesReader APIs** — Done (RLE +148%, Dictionary +67%)
+- **Bit-packing hot path** — Done (Round 18: delta decode +12% to +20%, RLE decoder PACKED branch symmetric to encoder)
