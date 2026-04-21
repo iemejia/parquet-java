@@ -60,6 +60,12 @@ public class DeltaBinaryPackingValuesWriterForInteger extends DeltaBinaryPacking
    */
   private int minDeltaInCurrentBlock = Integer.MAX_VALUE;
 
+  /**
+   * Cache of BytePacker instances indexed by bit width [0, 32].
+   * Avoids a factory dispatch + array load per miniblock flush.
+   */
+  private final BytePacker[] packerCache = new BytePacker[MAX_BITWIDTH + 1];
+
   public DeltaBinaryPackingValuesWriterForInteger(int slabSize, int pageSize, ByteBufferAllocator allocator) {
     this(DEFAULT_NUM_BLOCK_VALUES, DEFAULT_NUM_MINIBLOCKS, slabSize, pageSize, allocator);
   }
@@ -116,7 +122,11 @@ public class DeltaBinaryPackingValuesWriterForInteger extends DeltaBinaryPacking
     for (int i = 0; i < miniBlocksToFlush; i++) {
       // writing i th miniblock
       int currentBitWidth = bitWidths[i];
-      BytePacker packer = Packer.LITTLE_ENDIAN.newBytePacker(currentBitWidth);
+      BytePacker packer = packerCache[currentBitWidth];
+      if (packer == null) {
+        packer = Packer.LITTLE_ENDIAN.newBytePacker(currentBitWidth);
+        packerCache[currentBitWidth] = packer;
+      }
       int miniBlockStart = i * config.miniBlockSizeInValues;
       // Mini blocks are always flushed as full 32-value groups in the current format.
       // Use the packer's 32-value entry point to avoid four pack8Values calls per miniblock.
