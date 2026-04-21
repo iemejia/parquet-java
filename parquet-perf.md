@@ -1781,6 +1781,27 @@ Effect on `RleDictionaryIndexDecodingBenchmark` is within noise (the benchmark
 exercises mostly short PACKED runs); kept as a code-quality improvement that mirrors
 the encoder structure and benefits long PACKED runs (≥32 values).
 
+### Improvement 29: Cache packer in delta writers (resolves TODO)
+
+Addresses the explicit `TODO: should this cache the packer?` at
+`DeltaBinaryPackingValuesWriterForLong.java:119`. Adds a per-instance
+`BytePacker[]` / `BytePackerForLong[]` cache keyed by bit width to avoid a factory
+dispatch + array load on each miniblock flush. Symmetric to the reader cache added
+in Improvement 27.
+
+**IntEncodingBenchmark.encodeDelta** (5 iter × 1 fork):
+
+| Data Pattern | Baseline (M ops/s) | Optimized (M ops/s) | Δ |
+|---|---|---|---|
+| SEQUENTIAL | 73.05 | 73.67 | +0.8% |
+| RANDOM | 50.99 | 51.51 | +1.0% |
+| LOW_CARDINALITY | 61.15 | 61.37 | +0.4% |
+| HIGH_CARDINALITY | 51.30 | 50.79 | -1.0% |
+
+All within noise. Kept as code-quality improvement: resolves the TODO, mirrors the
+reader structure, and the long writer has a 65-entry bit-width space (vs 33 for int)
+where the factory dispatch has proportionally more work to skip.
+
 ### Surprising Finding: BitPackingBenchmark
 
 A new isolated `BitPackingBenchmark` was added to characterize the packer surface
@@ -1835,6 +1856,7 @@ unpack32}` over bit widths {1, 4, 7, 8, 10, 16, 24, 32}). Two findings:
 | 26 | Batch read APIs: ValuesReader hierarchy | parquet-column | decodeRle, decodeDictionary | **RLE +148%, Dict +42% to +67%** |
 | 27 | Delta decode: cache packer, batch unpack32, no slice | parquet-column | decodeDeltaLong, decodeDelta | **+12% to +20%** (TIMESTAMP_MILLIS, RANDOM, HIGH/LOW_CARDINALITY) |
 | 28 | RLE decoder: unpack32Values in PACKED branch | parquet-column | decodeRle | Code quality (symmetric to Round 6 encoder) |
+| 29 | Delta writers: cache packer (resolves TODO) | parquet-column | encodeDelta | Code quality (within noise; symmetric to Improvement 27) |
 
 ### Files Modified (Round 7)
 
@@ -1908,8 +1930,10 @@ unpack32}` over bit widths {1, 4, 7, 8, 10, 16, 24, 32}). Two findings:
 
 1. `parquet-column/src/main/java/org/apache/parquet/column/values/delta/DeltaBinaryPackingValuesReader.java`
 2. `parquet-column/src/main/java/org/apache/parquet/column/values/rle/RunLengthBitPackingHybridDecoder.java`
-3. `parquet-benchmarks/src/main/java/org/apache/parquet/benchmarks/LongDeltaDecodingBenchmark.java` (new)
-4. `parquet-benchmarks/src/main/java/org/apache/parquet/benchmarks/BitPackingBenchmark.java` (new)
+3. `parquet-column/src/main/java/org/apache/parquet/column/values/delta/DeltaBinaryPackingValuesWriterForInteger.java`
+4. `parquet-column/src/main/java/org/apache/parquet/column/values/delta/DeltaBinaryPackingValuesWriterForLong.java`
+5. `parquet-benchmarks/src/main/java/org/apache/parquet/benchmarks/LongDeltaDecodingBenchmark.java` (new)
+6. `parquet-benchmarks/src/main/java/org/apache/parquet/benchmarks/BitPackingBenchmark.java` (new)
 
 ## End-to-End Benchmark Comparison
 
@@ -1963,6 +1987,7 @@ because encoding/decoding is a larger fraction of total time.
 ### Commits
 
 ```
+d6ee8d401 Cache packer in delta writers (resolves TODO)
 d9a0a0fc9 Use unpack32Values in RLE hybrid decoder PACKED branch
 9c14a33c6 Optimize delta binary decode: cache packer, batch unpack32, eliminate slice allocation
 d442d5e68 Add batch read APIs to ValuesReader hierarchy: RLE +148%, Dictionary +67%
