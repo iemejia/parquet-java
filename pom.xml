@@ -407,6 +407,8 @@
         <artifactId>maven-failsafe-plugin</artifactId>
         <configuration>
           <argLine>${extraJavaTestArgs}</argLine>
+          <forkCount>1C</forkCount>
+          <reuseForks>true</reuseForks>
         </configuration>
         <executions>
           <execution>
@@ -423,6 +425,8 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
           <argLine>${surefire.argLine} ${extraJavaTestArgs}</argLine>
+          <forkCount>1C</forkCount>
+          <reuseForks>true</reuseForks>
           <systemPropertyVariables>
             <!-- Configure Parquet logging during tests
                  See http://www.slf4j.org/api/org/slf4j/impl/SimpleLogger.html
