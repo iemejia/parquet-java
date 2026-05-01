@@ -60,11 +60,17 @@
       <artifactId>parquet-hadoop</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <dependency>
+      <groupId>org.apache.parquet</groupId>
+      <artifactId>parquet-avro</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
 
-    <!-- Hadoop (transitive requirement for ParquetFileReader) -->
+    <!-- Hadoop (transitive requirement for ParquetFileReader and AvroParquetReader) -->
     <dependency>
       <groupId>org.apache.hadoop</groupId>
-      <artifactId>hadoop-common</artifactId>
+      <artifactId>hadoop-client</artifactId>
       <exclusions>
         <exclusion>
           <groupId>org.slf4j</groupId>
@@ -119,6 +125,12 @@
             ${extraJavaTestArgs}
             --add-opens=java.base/java.lang=ALL-UNNAMED
           </argLine>
+          <!-- Pass JAZZER_FUZZ env var through to the forked JVM so active fuzzing works -->
+          <environmentVariables>
+            <JAZZER_FUZZ>${env.JAZZER_FUZZ}</JAZZER_FUZZ>
+          </environmentVariables>
+          <!-- Jazzer needs real classpath, not manifest-only jar -->
+          <useManifestOnlyJar>false</useManifestOnlyJar>
         </configuration>
         <dependencies>
           <dependency>
