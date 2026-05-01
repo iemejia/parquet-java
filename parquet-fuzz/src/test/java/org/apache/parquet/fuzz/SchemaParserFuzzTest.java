@@ -30,6 +30,16 @@ import org.apache.parquet.schema.MessageTypeParser;
  */
 public class SchemaParserFuzzTest {
 
+  /** OSS-Fuzz entry point. */
+  public static void fuzzerTestOneInput(byte[] data) {
+    String input = new String(data, StandardCharsets.UTF_8);
+    try {
+      MessageTypeParser.parseMessageType(input);
+    } catch (IllegalArgumentException | IllegalStateException e) {
+      // Expected: parser rejects invalid schemas
+    }
+  }
+
   @FuzzTest(maxDuration = "5m")
   public void fuzzSchemaParser(byte[] data) {
     String input = new String(data, StandardCharsets.UTF_8);

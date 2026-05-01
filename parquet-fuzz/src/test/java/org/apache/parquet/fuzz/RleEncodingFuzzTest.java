@@ -35,6 +35,20 @@ public class RleEncodingFuzzTest {
 
   private static final HeapByteBufferAllocator ALLOCATOR = new HeapByteBufferAllocator();
 
+  /** OSS-Fuzz entry point. Multiplexes between roundtrip and raw-decode modes. */
+  public static void fuzzerTestOneInput(FuzzedDataProvider data) {
+    int mode = data.consumeInt(0, 1);
+    RleEncodingFuzzTest instance = new RleEncodingFuzzTest();
+    switch (mode) {
+      case 0:
+        instance.fuzzRleRoundtrip(data);
+        break;
+      default:
+        instance.fuzzRleRawDecode(data);
+        break;
+    }
+  }
+
   @FuzzTest(maxDuration = "5m")
   public void fuzzRleRoundtrip(FuzzedDataProvider data) {
     // bitWidth must be 1..32 for valid RLE encoding

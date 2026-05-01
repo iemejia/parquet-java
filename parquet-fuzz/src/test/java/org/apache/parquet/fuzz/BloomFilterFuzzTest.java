@@ -30,6 +30,20 @@ import org.apache.parquet.io.api.Binary;
  */
 public class BloomFilterFuzzTest {
 
+  /** OSS-Fuzz entry point. Multiplexes between roundtrip and raw-bytes modes. */
+  public static void fuzzerTestOneInput(FuzzedDataProvider data) {
+    int mode = data.consumeInt(0, 1);
+    BloomFilterFuzzTest instance = new BloomFilterFuzzTest();
+    switch (mode) {
+      case 0:
+        instance.fuzzBloomFilterRoundtrip(data);
+        break;
+      default:
+        instance.fuzzBloomFilterFromBytes(data);
+        break;
+    }
+  }
+
   @FuzzTest(maxDuration = "5m")
   public void fuzzBloomFilterRoundtrip(FuzzedDataProvider data) {
     // numBytes must be in [LOWER_BOUND_BYTES, UPPER_BOUND_BYTES] and will be rounded to power of 2

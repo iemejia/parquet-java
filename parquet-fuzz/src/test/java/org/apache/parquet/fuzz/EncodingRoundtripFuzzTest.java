@@ -70,6 +70,11 @@ public class EncodingRoundtripFuzzTest {
     BYTE_STREAM_SPLIT_LONG
   }
 
+  /** OSS-Fuzz entry point. */
+  public static void fuzzerTestOneInput(FuzzedDataProvider data) {
+    new EncodingRoundtripFuzzTest().fuzzEncodingRoundtrip(data);
+  }
+
   @FuzzTest(maxDuration = "5m")
   public void fuzzEncodingRoundtrip(FuzzedDataProvider data) {
     EncodingType encoding = data.pickValue(EncodingType.values());

@@ -51,6 +51,11 @@ public class StatisticsFuzzTest {
     INT32_TYPE, INT64_TYPE, FLOAT_TYPE, DOUBLE_TYPE, BOOLEAN_TYPE, BINARY_TYPE
   };
 
+  /** OSS-Fuzz entry point. */
+  public static void fuzzerTestOneInput(FuzzedDataProvider data) {
+    new StatisticsFuzzTest().fuzzStatisticsUpdateAndMerge(data);
+  }
+
   @FuzzTest(maxDuration = "5m")
   public void fuzzStatisticsUpdateAndMerge(FuzzedDataProvider data) {
     PrimitiveType type = TYPES[data.consumeInt(0, TYPES.length - 1)];

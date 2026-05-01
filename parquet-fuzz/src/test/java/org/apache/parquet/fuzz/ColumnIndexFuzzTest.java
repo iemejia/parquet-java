@@ -49,6 +49,11 @@ public class ColumnIndexFuzzTest {
 
   private static final PrimitiveType[] TYPES = {INT32_TYPE, INT64_TYPE, FLOAT_TYPE, DOUBLE_TYPE, BINARY_TYPE};
 
+  /** OSS-Fuzz entry point. */
+  public static void fuzzerTestOneInput(FuzzedDataProvider data) {
+    new ColumnIndexFuzzTest().fuzzColumnIndex(data);
+  }
+
   @FuzzTest(maxDuration = "5m")
   public void fuzzColumnIndex(FuzzedDataProvider data) {
     PrimitiveType type = TYPES[data.consumeInt(0, TYPES.length - 1)];
