@@ -20,4 +20,6 @@ target/
 mvn_install.log
 .vscode/*
 .DS_Store
+# Jazzer fuzzing corpus (transient)
+.cifuzz-corpus
 
