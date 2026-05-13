@@ -37,7 +37,7 @@ public abstract class ByteStreamSplitValuesWriter extends ValuesWriter {
 
   protected final int numStreams;
   protected final int elementSizeInBytes;
-  private final CapacityByteArrayOutputStream[] byteStreams;
+  protected final CapacityByteArrayOutputStream[] byteStreams;
 
   // Batch buffers for int (4-byte) and long (8-byte) scatter writes.
   // Only one of these is ever non-null per instance.
@@ -258,6 +258,8 @@ public abstract class ByteStreamSplitValuesWriter extends ValuesWriter {
 
   public static class FixedLenByteArrayByteStreamSplitValuesWriter extends ByteStreamSplitValuesWriter {
     private final int length;
+    private byte[][] batchBufs; // [stream][batchIndex] scratch buffers
+    private int flbaBatchCount;
 
     public FixedLenByteArrayByteStreamSplitValuesWriter(
         int length, int initialCapacity, int pageSize, ByteBufferAllocator allocator) {
@@ -269,7 +271,69 @@ public abstract class ByteStreamSplitValuesWriter extends ValuesWriter {
     public final void writeBytes(Binary v) {
       assert (v.length() == length)
           : ("Fixed Binary size " + v.length() + " does not match field type length " + length);
-      super.scatterBytes(v.getBytesUnsafe());
+      if (batchBufs == null) {
+        batchBufs = new byte[length][BATCH_SIZE];
+      }
+      byte[] bytes = v.getBytesUnsafe();
+      for (int stream = 0; stream < length; stream++) {
+        batchBufs[stream][flbaBatchCount] = bytes[stream];
+      }
+      flbaBatchCount++;
+      if (flbaBatchCount == BATCH_SIZE) {
+        flushFlbaBatch();
+      }
+    }
+
+    @Override
+    public void writeBinaries(Binary[] values, int offset, int len) {
+      if (batchBufs == null) {
+        batchBufs = new byte[length][BATCH_SIZE];
+      }
+      for (int i = offset; i < offset + len; i++) {
+        Binary v = values[i];
+        assert (v.length() == length)
+            : ("Fixed Binary size " + v.length() + " does not match field type length " + length);
+        byte[] bytes = v.getBytesUnsafe();
+        for (int stream = 0; stream < length; stream++) {
+          batchBufs[stream][flbaBatchCount] = bytes[stream];
+        }
+        flbaBatchCount++;
+        if (flbaBatchCount == BATCH_SIZE) {
+          flushFlbaBatch();
+        }
+      }
+    }
+
+    private void flushFlbaBatch() {
+      if (flbaBatchCount == 0) return;
+      final int count = flbaBatchCount;
+      for (int stream = 0; stream < length; stream++) {
+        byteStreams[stream].write(batchBufs[stream], 0, count);
+      }
+      flbaBatchCount = 0;
+    }
+
+    @Override
+    public BytesInput getBytes() {
+      flushFlbaBatch();
+      return super.getBytes();
+    }
+
+    @Override
+    public void reset() {
+      flbaBatchCount = 0;
+      super.reset();
+    }
+
+    @Override
+    public void close() {
+      flbaBatchCount = 0;
+      super.close();
+    }
+
+    @Override
+    public long getBufferedSize() {
+      return super.getBufferedSize() + (long) flbaBatchCount * length;
     }
 
     @Override
