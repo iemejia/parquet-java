@@ -94,8 +94,7 @@ public class ConcurrentCorrectnessTest {
   private void writeFile(File file, int threadIndex) throws IOException {
     SimpleGroupFactory factory = TestDataFactory.newGroupFactory();
     Random random = new Random(threadIndex); // deterministic per thread
-    try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(
-            new LocalOutputFile(file.toPath()))
+    try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(new LocalOutputFile(file.toPath()))
         .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
         .withType(TestDataFactory.FILE_BENCHMARK_SCHEMA)
         .build()) {
@@ -140,9 +139,6 @@ public class ConcurrentCorrectnessTest {
       }
     }
 
-    assertEquals(
-        "Row count mismatch for thread " + threadIndex,
-        ROWS_PER_THREAD,
-        rowCount);
+    assertEquals("Row count mismatch for thread " + threadIndex, ROWS_PER_THREAD, rowCount);
   }
 }

@@ -332,20 +332,20 @@ public class TestColumnChunkPageWriteStore {
     allocator = TrackingByteBufferAllocator.wrap(new HeapByteBufferAllocator());
     ParquetFileWriter mockFileWriter = Mockito.mock(ParquetFileWriter.class);
     MessageType schema = Types.buildMessage()
-        .required(INT32).named("col_a")
-        .required(INT64).named("col_b")
-        .required(FLOAT).named("col_c")
+        .required(INT32)
+        .named("col_a")
+        .required(INT64)
+        .named("col_b")
+        .required(FLOAT)
+        .named("col_c")
         .named("eager_release_test");
 
     BytesInput fakeData = BytesInput.fromInt(42);
     int fakeCount = 1;
     BinaryStatistics fakeStats = new BinaryStatistics();
 
-    ColumnChunkPageWriteStore store = new ColumnChunkPageWriteStore(
-        compressor(UNCOMPRESSED),
-        schema,
-        allocator,
-        Integer.MAX_VALUE);
+    ColumnChunkPageWriteStore store =
+        new ColumnChunkPageWriteStore(compressor(UNCOMPRESSED), schema, allocator, Integer.MAX_VALUE);
 
     for (ColumnDescriptor col : schema.getColumns()) {
       PageWriter pageWriter = store.getPageWriter(col);
@@ -369,18 +369,13 @@ public class TestColumnChunkPageWriteStore {
   @Test
   public void testDoubleCloseIsSafe() throws IOException {
     allocator = TrackingByteBufferAllocator.wrap(new HeapByteBufferAllocator());
-    MessageType schema = Types.buildMessage()
-        .required(INT32).named("col")
-        .named("double_close_test");
+    MessageType schema = Types.buildMessage().required(INT32).named("col").named("double_close_test");
 
     BytesInput fakeData = BytesInput.fromInt(7);
     BinaryStatistics fakeStats = new BinaryStatistics();
 
-    ColumnChunkPageWriteStore store = new ColumnChunkPageWriteStore(
-        compressor(UNCOMPRESSED),
-        schema,
-        allocator,
-        Integer.MAX_VALUE);
+    ColumnChunkPageWriteStore store =
+        new ColumnChunkPageWriteStore(compressor(UNCOMPRESSED), schema, allocator, Integer.MAX_VALUE);
 
     PageWriter pageWriter = store.getPageWriter(schema.getColumns().get(0));
     pageWriter.writePage(fakeData, 1, fakeStats, RLE, RLE, PLAIN);
@@ -407,9 +402,13 @@ public class TestColumnChunkPageWriteStore {
     fs.mkdirs(root);
 
     MessageType schema = Types.buildMessage()
-        .required(INT32).named("int_col")
-        .required(INT32).named("int_col2")
-        .required(BINARY).as(UTF8).named("str_col")
+        .required(INT32)
+        .named("int_col")
+        .required(INT32)
+        .named("int_col2")
+        .required(BINARY)
+        .as(UTF8)
+        .named("str_col")
         .named("roundtrip_test");
 
     int rowCount = 10;
@@ -432,23 +431,25 @@ public class TestColumnChunkPageWriteStore {
       writer.start();
       writer.startBlock(rowCount);
 
-      try (ColumnChunkPageWriteStore store = new ColumnChunkPageWriteStore(
-          compressor(UNCOMPRESSED), schema, allocator, Integer.MAX_VALUE)) {
+      try (ColumnChunkPageWriteStore store =
+          new ColumnChunkPageWriteStore(compressor(UNCOMPRESSED), schema, allocator, Integer.MAX_VALUE)) {
 
         ColumnDescriptor intCol = schema.getColumns().get(0);
         ColumnDescriptor intCol2 = schema.getColumns().get(1);
         ColumnDescriptor strCol = schema.getColumns().get(2);
 
-        Statistics<?> intStats = Statistics.getBuilderForReading(intCol.getPrimitiveType()).build();
-        Statistics<?> intStats2 = Statistics.getBuilderForReading(intCol2.getPrimitiveType()).build();
-        Statistics<?> strStats = Statistics.getBuilderForReading(strCol.getPrimitiveType()).build();
+        Statistics<?> intStats = Statistics.getBuilderForReading(intCol.getPrimitiveType())
+            .build();
+        Statistics<?> intStats2 = Statistics.getBuilderForReading(intCol2.getPrimitiveType())
+            .build();
+        Statistics<?> strStats = Statistics.getBuilderForReading(strCol.getPrimitiveType())
+            .build();
 
         store.getPageWriter(intCol)
             .writePage(BytesInput.fromInt(intVal1), valueCount, intStats, RLE, RLE, PLAIN);
         store.getPageWriter(intCol2)
             .writePage(BytesInput.fromInt(intVal2), valueCount, intStats2, RLE, RLE, PLAIN);
-        store.getPageWriter(strCol)
-            .writePage(BytesInput.from(strVal), valueCount, strStats, RLE, RLE, PLAIN);
+        store.getPageWriter(strCol).writePage(BytesInput.from(strVal), valueCount, strStats, RLE, RLE, PLAIN);
 
         // This triggers eager release internally
         store.flushToFileWriter(writer);

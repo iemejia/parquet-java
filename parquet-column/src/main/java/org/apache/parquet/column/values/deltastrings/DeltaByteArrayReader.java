@@ -18,8 +18,8 @@
  */
 package org.apache.parquet.column.values.deltastrings;
 
-import java.io.OutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.column.values.RequiresPreviousReader;
 import org.apache.parquet.column.values.ValuesReader;
