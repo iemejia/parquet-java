@@ -25,8 +25,6 @@ import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.HeapByteBufferAllocator;
 import org.apache.parquet.column.Dictionary;
 import org.apache.parquet.column.Encoding;
-import org.apache.parquet.column.page.DictionaryPage;
-import org.apache.parquet.column.values.ValuesReader;
 import org.apache.parquet.column.values.ValuesWriter;
 import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesReaderForFLBA;
 import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesWriter;
@@ -104,9 +102,7 @@ public class FixedLenByteArrayEncodingBenchmark {
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
-    int distinct = "LOW_CARDINALITY".equals(dataPattern)
-        ? TestDataFactory.LOW_CARDINALITY_DISTINCT
-        : 0;
+    int distinct = "LOW_CARDINALITY".equals(dataPattern) ? TestDataFactory.LOW_CARDINALITY_DISTINCT : 0;
     data = TestDataFactory.generateFixedLenByteArrays(
         VALUE_COUNT, fixedLength, distinct, TestDataFactory.DEFAULT_SEED);
 
@@ -129,7 +125,10 @@ public class FixedLenByteArrayEncodingBenchmark {
   private void setupDict() throws IOException {
     DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter w =
         new DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter(
-            MAX_DICT_BYTE_SIZE, fixedLength, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN,
+            MAX_DICT_BYTE_SIZE,
+            fixedLength,
+            Encoding.PLAIN_DICTIONARY,
+            Encoding.PLAIN,
             new HeapByteBufferAllocator());
     for (Binary v : data) {
       w.writeBytes(v);
@@ -193,7 +192,10 @@ public class FixedLenByteArrayEncodingBenchmark {
   public void encodeDictionary(Blackhole bh) throws IOException {
     DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter w =
         new DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter(
-            MAX_DICT_BYTE_SIZE, fixedLength, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN,
+            MAX_DICT_BYTE_SIZE,
+            fixedLength,
+            Encoding.PLAIN_DICTIONARY,
+            Encoding.PLAIN,
             new HeapByteBufferAllocator());
     for (Binary v : data) {
       w.writeBytes(v);
@@ -243,16 +245,6 @@ public class FixedLenByteArrayEncodingBenchmark {
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(reader.readBytes());
     }
-  }
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void decodeBssBatch(Blackhole bh) throws IOException {
-    ByteStreamSplitValuesReaderForFLBA reader = new ByteStreamSplitValuesReaderForFLBA(fixedLength);
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(bssEncoded)));
-    Binary[] batch = new Binary[VALUE_COUNT];
-    reader.readBinaries(batch, 0, VALUE_COUNT);
-    bh.consume(batch);
   }
 
   @Benchmark
