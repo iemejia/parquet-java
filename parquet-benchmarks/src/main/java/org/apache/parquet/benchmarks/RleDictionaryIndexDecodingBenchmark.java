@@ -81,9 +81,11 @@ public class RleDictionaryIndexDecodingBenchmark {
   // encoded with 4-byte LE length prefix, as expected by ValuesReader.initFromPage()
   private byte[] encodedWithLengthPrefix;
 
+  private int[] ids;
+
   @Setup(Level.Trial)
   public void setup() throws IOException {
-    int[] ids = generateDictionaryIds();
+    ids = generateDictionaryIds();
     try (RunLengthBitPackingHybridEncoder encoder = new RunLengthBitPackingHybridEncoder(
         BIT_WIDTH, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator())) {
       for (int id : ids) {
@@ -113,6 +115,18 @@ public class RleDictionaryIndexDecodingBenchmark {
             VALUE_COUNT, TestDataFactory.LOW_CARDINALITY_DISTINCT, TestDataFactory.DEFAULT_SEED);
       default:
         throw new IllegalArgumentException("Unknown index pattern: " + indexPattern);
+    }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeDictionaryIds() throws IOException {
+    try (RunLengthBitPackingHybridEncoder encoder = new RunLengthBitPackingHybridEncoder(
+        BIT_WIDTH, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator())) {
+      for (int id : ids) {
+        encoder.writeInt(id);
+      }
+      return encoder.toBytes().toByteArray();
     }
   }
 
