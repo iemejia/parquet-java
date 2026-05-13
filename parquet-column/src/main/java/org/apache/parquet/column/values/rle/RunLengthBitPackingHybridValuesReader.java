@@ -52,6 +52,11 @@ public class RunLengthBitPackingHybridValuesReader extends ValuesReader {
   }
 
   @Override
+  public void readIntegers(int[] dest, int offset, int count) {
+    decoder.readInts(dest, offset, count);
+  }
+
+  @Override
   public boolean readBoolean() {
     return readInteger() == 0 ? false : true;
   }
