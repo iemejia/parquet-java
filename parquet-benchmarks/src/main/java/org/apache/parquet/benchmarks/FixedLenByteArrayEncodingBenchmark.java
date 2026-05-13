@@ -168,6 +168,16 @@ public class FixedLenByteArrayEncodingBenchmark {
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodePlainBatch() throws IOException {
+    FixedLenByteArrayPlainValuesWriter writer = newPlainWriter();
+    writer.writeBinaries(data, 0, data.length);
+    byte[] bytes = writer.getBytes().toByteArray();
+    writer.close();
+    return bytes;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
   public byte[] encodeDelta() throws IOException {
     return encodeWith(newDeltaWriter());
   }
@@ -207,6 +217,16 @@ public class FixedLenByteArrayEncodingBenchmark {
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
+  public void decodePlainBatch(Blackhole bh) throws IOException {
+    FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(fixedLength);
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(plainEncoded)));
+    Binary[] batch = new Binary[VALUE_COUNT];
+    reader.readBinaries(batch, 0, VALUE_COUNT);
+    bh.consume(batch);
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
   public void decodeDelta(Blackhole bh) throws IOException {
     DeltaByteArrayReader reader = new DeltaByteArrayReader();
     reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(deltaEncoded)));
@@ -223,6 +243,16 @@ public class FixedLenByteArrayEncodingBenchmark {
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(reader.readBytes());
     }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeBssBatch(Blackhole bh) throws IOException {
+    ByteStreamSplitValuesReaderForFLBA reader = new ByteStreamSplitValuesReaderForFLBA(fixedLength);
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(bssEncoded)));
+    Binary[] batch = new Binary[VALUE_COUNT];
+    reader.readBinaries(batch, 0, VALUE_COUNT);
+    bh.consume(batch);
   }
 
   @Benchmark
