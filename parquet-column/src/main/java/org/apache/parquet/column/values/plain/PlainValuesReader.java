@@ -24,7 +24,6 @@ import java.nio.ByteOrder;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.LittleEndianDataInputStream;
 import org.apache.parquet.column.values.ValuesReader;
-import org.apache.parquet.io.ParquetDecodingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -71,9 +70,8 @@ public abstract class PlainValuesReader extends ValuesReader {
 
     @Override
     public void readDoubles(double[] dest, int offset, int count) {
-      for (int i = 0; i < count; i++) {
-        dest[offset + i] = buffer.getDouble();
-      }
+      buffer.asDoubleBuffer().get(dest, offset, count);
+      buffer.position(buffer.position() + count * Double.BYTES);
     }
   }
 
@@ -91,9 +89,8 @@ public abstract class PlainValuesReader extends ValuesReader {
 
     @Override
     public void readFloats(float[] dest, int offset, int count) {
-      for (int i = 0; i < count; i++) {
-        dest[offset + i] = buffer.getFloat();
-      }
+      buffer.asFloatBuffer().get(dest, offset, count);
+      buffer.position(buffer.position() + count * Float.BYTES);
     }
   }
 
@@ -111,9 +108,8 @@ public abstract class PlainValuesReader extends ValuesReader {
 
     @Override
     public void readIntegers(int[] dest, int offset, int count) {
-      for (int i = 0; i < count; i++) {
-        dest[offset + i] = buffer.getInt();
-      }
+      buffer.asIntBuffer().get(dest, offset, count);
+      buffer.position(buffer.position() + count * Integer.BYTES);
     }
   }
 
@@ -131,9 +127,8 @@ public abstract class PlainValuesReader extends ValuesReader {
 
     @Override
     public void readLongs(long[] dest, int offset, int count) {
-      for (int i = 0; i < count; i++) {
-        dest[offset + i] = buffer.getLong();
-      }
+      buffer.asLongBuffer().get(dest, offset, count);
+      buffer.position(buffer.position() + count * Long.BYTES);
     }
   }
 }
