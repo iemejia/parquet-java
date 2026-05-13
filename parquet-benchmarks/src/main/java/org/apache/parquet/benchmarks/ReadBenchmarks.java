@@ -66,7 +66,7 @@ import org.openjdk.jmh.infra.Blackhole;
 @State(Scope.Benchmark)
 public class ReadBenchmarks {
 
-  @Param({"UNCOMPRESSED", "SNAPPY", "GZIP", "ZSTD"})
+  @Param({"UNCOMPRESSED", "SNAPPY", "GZIP", "ZSTD", "LZ4_RAW"})
   public String codec;
 
   @Param({"PARQUET_1_0", "PARQUET_2_0"})
@@ -82,8 +82,7 @@ public class ReadBenchmarks {
 
     SimpleGroupFactory factory = TestDataFactory.newGroupFactory();
     Random random = new Random(42);
-    try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(
-            new LocalOutputFile(tempFile.toPath()))
+    try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(new LocalOutputFile(tempFile.toPath()))
         .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
         .withType(TestDataFactory.FILE_BENCHMARK_SCHEMA)
         .withCompressionCodec(CompressionCodecName.valueOf(codec))
