@@ -40,20 +40,22 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Encoding-level micro-benchmarks for the DICTIONARY encoding across
- * {@code LONG}, {@code FLOAT}, {@code DOUBLE}, and {@code FIXED_LEN_BYTE_ARRAY}
- * types — complementing the type-specific dictionary coverage already in
- * {@link IntEncodingBenchmark}, {@link BinaryEncodingBenchmark}, and
- * {@link FixedLenByteArrayEncodingBenchmark}. Decoding benchmarks live in
- * {@link DictionaryDecodingBenchmark}.
+ * Encoding-level micro-benchmarks for the DICTIONARY encoding across all Parquet
+ * types that support it: {@code INT32}, {@code INT64}, {@code FLOAT},
+ * {@code DOUBLE}, {@code BINARY}, and {@code FIXED_LEN_BYTE_ARRAY}.
+ * Decoding benchmarks live in {@link DictionaryDecodingBenchmark}.
+ *
+ * <p>Fixed-width numeric types ({@code INT32}, {@code INT64}, {@code FLOAT},
+ * {@code DOUBLE}) are benchmarked by top-level methods controlled by a class-level
+ * {@code dataPattern} parameter. Variable-length types ({@code BINARY} and
+ * {@code FIXED_LEN_BYTE_ARRAY}) use inner {@link BinaryState} and {@link FlbaState}
+ * classes with their own {@code @Param} dimensions to avoid JMH cross-product
+ * pollution.
  *
  * <p>Each type's encode benchmark measures the full dictionary-build path
- * (type-specific hash map + id append).
- *
- * <p>The {@code dataPattern} parameter controls cardinality to exercise
- * both the dictionary-hits-only path (LOW_CARDINALITY) and the path
- * where every value is unique (HIGH_CARDINALITY, which may trigger
- * dictionary fallback for large value counts).
+ * (type-specific hash map + id append). Each invocation encodes
+ * {@value #VALUE_COUNT} values; throughput is reported per-value via
+ * {@link OperationsPerInvocation}.
  */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -66,16 +68,13 @@ public class DictionaryEncodingBenchmark {
   static final int VALUE_COUNT = 100_000;
   private static final int MAX_DICT_BYTE_SIZE = 4 * 1024 * 1024;
 
-  // Fixed length for FLBA tests (16 = UUID-sized)
-  private static final int FLBA_LENGTH = 16;
-
   @Param({"LOW_CARDINALITY", "HIGH_CARDINALITY"})
   public String dataPattern;
 
+  private int[] intData;
   private long[] longData;
   private float[] floatData;
   private double[] doubleData;
-  private Binary[] flbaData;
 
   @Setup(Level.Trial)
   public void setup() {
@@ -86,25 +85,40 @@ public class DictionaryEncodingBenchmark {
     long seed = TestDataFactory.DEFAULT_SEED;
 
     if (distinct > 0) {
+      intData = TestDataFactory.generateLowCardinalityInts(VALUE_COUNT, distinct, seed);
       longData = TestDataFactory.generateLowCardinalityLongs(VALUE_COUNT, distinct, seed);
       floatData = TestDataFactory.generateLowCardinalityFloats(VALUE_COUNT, distinct, seed);
       doubleData = TestDataFactory.generateLowCardinalityDoubles(VALUE_COUNT, distinct, seed);
-      flbaData = TestDataFactory.generateFixedLenByteArrays(VALUE_COUNT, FLBA_LENGTH, distinct, seed);
     } else {
+      intData = TestDataFactory.generateRandomInts(VALUE_COUNT, seed);
       longData = TestDataFactory.generateRandomLongs(VALUE_COUNT, seed);
       floatData = TestDataFactory.generateRandomFloats(VALUE_COUNT, seed);
       doubleData = TestDataFactory.generateRandomDoubles(VALUE_COUNT, seed);
-      flbaData = TestDataFactory.generateFixedLenByteArrays(VALUE_COUNT, FLBA_LENGTH, 0, seed);
     }
   }
 
-  // ==== ENCODE BENCHMARKS ====
+  // ==== Fixed-width numeric encode benchmarks ====
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void encodeInt(Blackhole bh) throws IOException {
+    DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter w =
+        new DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter(
+            MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+    for (int v : intData) {
+      w.writeInteger(v);
+    }
+    BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
+    bh.consume(enc.dictData);
+    bh.consume(enc.dictPage);
+  }
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
   public void encodeLong(Blackhole bh) throws IOException {
-    DictionaryValuesWriter.PlainLongDictionaryValuesWriter w = new DictionaryValuesWriter.PlainLongDictionaryValuesWriter(
-        MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+    DictionaryValuesWriter.PlainLongDictionaryValuesWriter w =
+        new DictionaryValuesWriter.PlainLongDictionaryValuesWriter(
+            MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
     for (long v : longData) {
       w.writeLong(v);
     }
@@ -116,8 +130,9 @@ public class DictionaryEncodingBenchmark {
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
   public void encodeFloat(Blackhole bh) throws IOException {
-    DictionaryValuesWriter.PlainFloatDictionaryValuesWriter w = new DictionaryValuesWriter.PlainFloatDictionaryValuesWriter(
-        MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+    DictionaryValuesWriter.PlainFloatDictionaryValuesWriter w =
+        new DictionaryValuesWriter.PlainFloatDictionaryValuesWriter(
+            MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
     for (float v : floatData) {
       w.writeFloat(v);
     }
@@ -129,8 +144,9 @@ public class DictionaryEncodingBenchmark {
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
   public void encodeDouble(Blackhole bh) throws IOException {
-    DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter w = new DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter(
-        MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+    DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter w =
+        new DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter(
+            MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
     for (double v : doubleData) {
       w.writeDouble(v);
     }
@@ -139,14 +155,68 @@ public class DictionaryEncodingBenchmark {
     bh.consume(enc.dictPage);
   }
 
+  // ==== BINARY (parameterised by stringLength and cardinality) ====
+
+  @State(Scope.Thread)
+  public static class BinaryState {
+    @Param({"10", "100", "1000"})
+    public int stringLength;
+
+    @Param({"LOW", "HIGH"})
+    public String cardinality;
+
+    Binary[] data;
+
+    @Setup(Level.Trial)
+    public void setup() {
+      int distinct = "LOW".equals(cardinality) ? TestDataFactory.LOW_CARDINALITY_DISTINCT : 0;
+      data = TestDataFactory.generateBinaryData(
+          VALUE_COUNT, stringLength, distinct, TestDataFactory.DEFAULT_SEED);
+    }
+  }
+
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public void encodeFlba(Blackhole bh) throws IOException {
+  public void encodeBinary(BinaryState state, Blackhole bh) throws IOException {
+    DictionaryValuesWriter.PlainBinaryDictionaryValuesWriter w =
+        new DictionaryValuesWriter.PlainBinaryDictionaryValuesWriter(
+            MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+    for (Binary v : state.data) {
+      w.writeBytes(v);
+    }
+    BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
+    bh.consume(enc.dictData);
+    bh.consume(enc.dictPage);
+  }
+
+  // ==== FIXED_LEN_BYTE_ARRAY (parameterised by fixedLength and cardinality) ====
+
+  @State(Scope.Thread)
+  public static class FlbaState {
+    @Param({"2", "12", "16"})
+    public int fixedLength;
+
+    @Param({"LOW", "HIGH"})
+    public String cardinality;
+
+    Binary[] data;
+
+    @Setup(Level.Trial)
+    public void setup() {
+      int distinct = "LOW".equals(cardinality) ? TestDataFactory.LOW_CARDINALITY_DISTINCT : 0;
+      data = TestDataFactory.generateFixedLenByteArrays(
+          VALUE_COUNT, fixedLength, distinct, TestDataFactory.DEFAULT_SEED);
+    }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void encodeFlba(FlbaState state, Blackhole bh) throws IOException {
     DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter w =
         new DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter(
-            MAX_DICT_BYTE_SIZE, FLBA_LENGTH, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN,
+            MAX_DICT_BYTE_SIZE, state.fixedLength, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN,
             new HeapByteBufferAllocator());
-    for (Binary v : flbaData) {
+    for (Binary v : state.data) {
       w.writeBytes(v);
     }
     BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);

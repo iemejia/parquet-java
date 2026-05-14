@@ -23,17 +23,11 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.TimeUnit;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.HeapByteBufferAllocator;
-import org.apache.parquet.column.Dictionary;
-import org.apache.parquet.column.Encoding;
-import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.values.ValuesWriter;
 import org.apache.parquet.column.values.deltalengthbytearray.DeltaLengthByteArrayValuesReader;
 import org.apache.parquet.column.values.deltalengthbytearray.DeltaLengthByteArrayValuesWriter;
 import org.apache.parquet.column.values.deltastrings.DeltaByteArrayReader;
 import org.apache.parquet.column.values.deltastrings.DeltaByteArrayWriter;
-import org.apache.parquet.column.values.dictionary.DictionaryValuesReader;
-import org.apache.parquet.column.values.dictionary.DictionaryValuesWriter;
-import org.apache.parquet.column.values.dictionary.PlainValuesDictionary;
 import org.apache.parquet.io.api.Binary;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -51,21 +45,16 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Encoding-level and decoding-level micro-benchmarks for BINARY values.
- * Compares DELTA_BYTE_ARRAY, DELTA_LENGTH_BYTE_ARRAY, and DICTIONARY encodings
- * across different string lengths and cardinality patterns. PLAIN encoding
- * benchmarks live in {@link PlainEncodingBenchmark} and {@link PlainDecodingBenchmark}.
+ * Encoding and decoding micro-benchmarks for BINARY delta encodings:
+ * DELTA_LENGTH_BYTE_ARRAY and DELTA_BYTE_ARRAY. Exercises both encodings across
+ * different string lengths.
+ *
+ * <p>PLAIN encoding benchmarks live in {@link PlainEncodingBenchmark} and
+ * {@link PlainDecodingBenchmark}. Dictionary benchmarks live in
+ * {@link DictionaryEncodingBenchmark} and {@link DictionaryDecodingBenchmark}.
  *
  * <p>Each benchmark invocation processes {@value #VALUE_COUNT} values. Throughput is
  * reported per-value using {@link OperationsPerInvocation}.
- *
- * <p>The dictionary encode/decode benchmarks intentionally measure the full path:
- * the encoder produces both the RLE-encoded indices and a {@link DictionaryPage};
- * the decoder consumes the indices through a {@link DictionaryValuesReader} backed
- * by the same dictionary. If the dictionary exceeds {@link #MAX_DICT_BYTE_SIZE}
- * (which can happen for high-cardinality, long-string parameter combinations) the
- * writer falls back to plain encoding and dictionary decoding for that combination
- * is skipped.
  */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -78,43 +67,21 @@ public class BinaryEncodingBenchmark {
   static final int VALUE_COUNT = 100_000;
   private static final int INIT_SLAB_SIZE = 64 * 1024;
   private static final int PAGE_SIZE = 4 * 1024 * 1024;
-  private static final int MAX_DICT_BYTE_SIZE = 4 * 1024 * 1024;
 
   @Param({"10", "100", "1000"})
   public int stringLength;
 
-  /** LOW = 100 distinct values; HIGH = all unique. */
-  @Param({"LOW", "HIGH"})
-  public String cardinality;
-
   private Binary[] data;
   private byte[] deltaLengthEncoded;
   private byte[] deltaStringsEncoded;
-  private byte[] dictEncoded;
-  private DictionaryPage dictPage;
-  private Dictionary binaryDictionary;
-  private boolean dictionaryAvailable;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
-    int distinct = "LOW".equals(cardinality) ? TestDataFactory.LOW_CARDINALITY_DISTINCT : 0;
-    data = TestDataFactory.generateBinaryData(VALUE_COUNT, stringLength, distinct, TestDataFactory.DEFAULT_SEED);
+    data = TestDataFactory.generateBinaryData(VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
 
     // Pre-encode data for decode benchmarks
     deltaLengthEncoded = encodeBinaryWith(newDeltaLengthWriter());
     deltaStringsEncoded = encodeBinaryWith(newDeltaStringsWriter());
-
-    DictionaryValuesWriter.PlainBinaryDictionaryValuesWriter dictWriter = newDictWriter();
-    for (Binary v : data) {
-      dictWriter.writeBytes(v);
-    }
-    BenchmarkEncodingUtils.EncodedDictionary encoded = BenchmarkEncodingUtils.drainDictionary(dictWriter);
-    dictEncoded = encoded.dictData;
-    dictPage = encoded.dictPage;
-    dictionaryAvailable = !encoded.fellBackToPlain();
-    if (dictionaryAvailable) {
-      binaryDictionary = new PlainValuesDictionary.PlainBinaryDictionary(dictPage);
-    }
   }
 
   private byte[] encodeBinaryWith(ValuesWriter writer) throws IOException {
@@ -126,14 +93,6 @@ public class BinaryEncodingBenchmark {
     return bytes;
   }
 
-  private BenchmarkEncodingUtils.EncodedDictionary encodeDictionaryWith(
-      DictionaryValuesWriter.PlainBinaryDictionaryValuesWriter writer) throws IOException {
-    for (Binary v : data) {
-      writer.writeBytes(v);
-    }
-    return BenchmarkEncodingUtils.drainDictionary(writer);
-  }
-
   // ---- Writer factories ----
 
   private static DeltaLengthByteArrayValuesWriter newDeltaLengthWriter() {
@@ -142,11 +101,6 @@ public class BinaryEncodingBenchmark {
 
   private static DeltaByteArrayWriter newDeltaStringsWriter() {
     return new DeltaByteArrayWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
-  }
-
-  private static DictionaryValuesWriter.PlainBinaryDictionaryValuesWriter newDictWriter() {
-    return new DictionaryValuesWriter.PlainBinaryDictionaryValuesWriter(
-        MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
   }
 
   // ---- Encode benchmarks ----
@@ -161,14 +115,6 @@ public class BinaryEncodingBenchmark {
   @OperationsPerInvocation(VALUE_COUNT)
   public byte[] encodeDeltaByteArray() throws IOException {
     return encodeBinaryWith(newDeltaStringsWriter());
-  }
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void encodeDictionary(Blackhole bh) throws IOException {
-    BenchmarkEncodingUtils.EncodedDictionary encoded = encodeDictionaryWith(newDictWriter());
-    bh.consume(encoded.dictData);
-    bh.consume(encoded.dictPage);
   }
 
   // ---- Decode benchmarks ----
@@ -188,21 +134,6 @@ public class BinaryEncodingBenchmark {
   public void decodeDeltaByteArray(Blackhole bh) throws IOException {
     DeltaByteArrayReader reader = new DeltaByteArrayReader();
     reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(deltaStringsEncoded)));
-    for (int i = 0; i < VALUE_COUNT; i++) {
-      bh.consume(reader.readBytes());
-    }
-  }
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void decodeDictionary(Blackhole bh) throws IOException {
-    if (!dictionaryAvailable) {
-      // Dictionary fell back to plain encoding (e.g. high-cardinality long strings
-      // exceeding MAX_DICT_BYTE_SIZE). Skip to keep the benchmark meaningful.
-      return;
-    }
-    DictionaryValuesReader reader = new DictionaryValuesReader(binaryDictionary);
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(dictEncoded)));
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(reader.readBytes());
     }

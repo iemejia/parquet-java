@@ -45,21 +45,21 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Decoding-level micro-benchmarks for the DICTIONARY encoding across
- * {@code LONG}, {@code FLOAT}, {@code DOUBLE}, and {@code FIXED_LEN_BYTE_ARRAY}
- * types — complementing the type-specific dictionary coverage already in
- * {@link IntEncodingBenchmark}, {@link BinaryEncodingBenchmark}, and
- * {@link FixedLenByteArrayEncodingBenchmark}. Encoding benchmarks live in
- * {@link DictionaryEncodingBenchmark}.
+ * Decoding-level micro-benchmarks for the DICTIONARY encoding across all Parquet
+ * types that support it: {@code INT32}, {@code INT64}, {@code FLOAT},
+ * {@code DOUBLE}, {@code BINARY}, and {@code FIXED_LEN_BYTE_ARRAY}.
+ * Encoding benchmarks live in {@link DictionaryEncodingBenchmark}.
  *
- * <p>Decode benchmarks measure the {@link DictionaryValuesReader} lookup path,
- * both per-value and batch. Each invocation decodes {@value #VALUE_COUNT} values;
- * throughput is reported per-value via {@link OperationsPerInvocation}.
+ * <p>Fixed-width numeric types ({@code INT32}, {@code INT64}, {@code FLOAT},
+ * {@code DOUBLE}) are benchmarked by top-level methods (both scalar and batch
+ * variants) controlled by a class-level {@code dataPattern} parameter.
+ * Variable-length types ({@code BINARY} and {@code FIXED_LEN_BYTE_ARRAY}) use
+ * inner {@link BinaryState} and {@link FlbaState} classes with their own
+ * {@code @Param} dimensions to avoid JMH cross-product pollution.
  *
- * <p>The {@code dataPattern} parameter controls cardinality to exercise
- * both the dictionary-hits-only path (LOW_CARDINALITY) and the path
- * where every value is unique (HIGH_CARDINALITY, which may trigger
- * dictionary fallback for large value counts).
+ * <p>Decode benchmarks measure the {@link DictionaryValuesReader} lookup path.
+ * Each invocation decodes {@value #VALUE_COUNT} values; throughput is reported
+ * per-value via {@link OperationsPerInvocation}.
  */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -72,13 +72,14 @@ public class DictionaryDecodingBenchmark {
   static final int VALUE_COUNT = 100_000;
   private static final int MAX_DICT_BYTE_SIZE = 4 * 1024 * 1024;
 
-  // Fixed length for FLBA tests (16 = UUID-sized)
-  private static final int FLBA_LENGTH = 16;
-
   @Param({"LOW_CARDINALITY", "HIGH_CARDINALITY"})
   public String dataPattern;
 
-  // ---- Pre-encoded dictionary pages ----
+  // ---- Pre-encoded dictionary pages for fixed-width numeric types ----
+  private byte[] intDictDataEncoded;
+  private Dictionary intDictionary;
+  private boolean intDictAvailable;
+
   private byte[] longDictDataEncoded;
   private Dictionary longDictionary;
   private boolean longDictAvailable;
@@ -91,11 +92,8 @@ public class DictionaryDecodingBenchmark {
   private Dictionary doubleDictionary;
   private boolean doubleDictAvailable;
 
-  private byte[] flbaDictDataEncoded;
-  private Dictionary flbaDictionary;
-  private boolean flbaDictAvailable;
-
   // Pre-allocated batch destination arrays (avoid per-invocation allocation artifact)
+  private int[] intDest;
   private long[] longDest;
   private float[] floatDest;
   private double[] doubleDest;
@@ -108,37 +106,53 @@ public class DictionaryDecodingBenchmark {
 
     long seed = TestDataFactory.DEFAULT_SEED;
 
+    int[] intData;
     long[] longData;
     float[] floatData;
     double[] doubleData;
-    Binary[] flbaData;
 
     if (distinct > 0) {
+      intData = TestDataFactory.generateLowCardinalityInts(VALUE_COUNT, distinct, seed);
       longData = TestDataFactory.generateLowCardinalityLongs(VALUE_COUNT, distinct, seed);
       floatData = TestDataFactory.generateLowCardinalityFloats(VALUE_COUNT, distinct, seed);
       doubleData = TestDataFactory.generateLowCardinalityDoubles(VALUE_COUNT, distinct, seed);
-      flbaData = TestDataFactory.generateFixedLenByteArrays(VALUE_COUNT, FLBA_LENGTH, distinct, seed);
     } else {
+      intData = TestDataFactory.generateRandomInts(VALUE_COUNT, seed);
       longData = TestDataFactory.generateRandomLongs(VALUE_COUNT, seed);
       floatData = TestDataFactory.generateRandomFloats(VALUE_COUNT, seed);
       doubleData = TestDataFactory.generateRandomDoubles(VALUE_COUNT, seed);
-      flbaData = TestDataFactory.generateFixedLenByteArrays(VALUE_COUNT, FLBA_LENGTH, 0, seed);
     }
 
-    // Pre-encode for decode benchmarks
+    setupIntDict(intData);
     setupLongDict(longData);
     setupFloatDict(floatData);
     setupDoubleDict(doubleData);
-    setupFlbaDict(flbaData);
 
+    intDest = new int[VALUE_COUNT];
     longDest = new long[VALUE_COUNT];
     floatDest = new float[VALUE_COUNT];
     doubleDest = new double[VALUE_COUNT];
   }
 
+  private void setupIntDict(int[] data) throws IOException {
+    DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter w =
+        new DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter(
+            MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+    for (int v : data) {
+      w.writeInteger(v);
+    }
+    BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
+    intDictDataEncoded = enc.dictData;
+    intDictAvailable = !enc.fellBackToPlain();
+    if (intDictAvailable) {
+      intDictionary = new PlainValuesDictionary.PlainIntegerDictionary(enc.dictPage);
+    }
+  }
+
   private void setupLongDict(long[] data) throws IOException {
-    DictionaryValuesWriter.PlainLongDictionaryValuesWriter w = new DictionaryValuesWriter.PlainLongDictionaryValuesWriter(
-        MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+    DictionaryValuesWriter.PlainLongDictionaryValuesWriter w =
+        new DictionaryValuesWriter.PlainLongDictionaryValuesWriter(
+            MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
     for (long v : data) {
       w.writeLong(v);
     }
@@ -151,8 +165,9 @@ public class DictionaryDecodingBenchmark {
   }
 
   private void setupFloatDict(float[] data) throws IOException {
-    DictionaryValuesWriter.PlainFloatDictionaryValuesWriter w = new DictionaryValuesWriter.PlainFloatDictionaryValuesWriter(
-        MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+    DictionaryValuesWriter.PlainFloatDictionaryValuesWriter w =
+        new DictionaryValuesWriter.PlainFloatDictionaryValuesWriter(
+            MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
     for (float v : data) {
       w.writeFloat(v);
     }
@@ -165,8 +180,9 @@ public class DictionaryDecodingBenchmark {
   }
 
   private void setupDoubleDict(double[] data) throws IOException {
-    DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter w = new DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter(
-        MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+    DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter w =
+        new DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter(
+            MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
     for (double v : data) {
       w.writeDouble(v);
     }
@@ -178,23 +194,18 @@ public class DictionaryDecodingBenchmark {
     }
   }
 
-  private void setupFlbaDict(Binary[] data) throws IOException {
-    DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter w =
-        new DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter(
-            MAX_DICT_BYTE_SIZE, FLBA_LENGTH, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN,
-            new HeapByteBufferAllocator());
-    for (Binary v : data) {
-      w.writeBytes(v);
-    }
-    BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
-    flbaDictDataEncoded = enc.dictData;
-    flbaDictAvailable = !enc.fellBackToPlain();
-    if (flbaDictAvailable) {
-      flbaDictionary = new PlainValuesDictionary.PlainBinaryDictionary(enc.dictPage, FLBA_LENGTH);
+  // ==== Fixed-width numeric decode benchmarks (per-value) ====
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeInt(Blackhole bh) throws IOException {
+    if (!intDictAvailable) return;
+    DictionaryValuesReader r = new DictionaryValuesReader(intDictionary);
+    r.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(intDictDataEncoded)));
+    for (int i = 0; i < VALUE_COUNT; i++) {
+      bh.consume(r.readInteger());
     }
   }
-
-  // ==== DECODE BENCHMARKS (per-value) ====
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
@@ -229,18 +240,17 @@ public class DictionaryDecodingBenchmark {
     }
   }
 
+  // ==== Fixed-width numeric decode benchmarks (batch) ====
+
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public void decodeFlba(Blackhole bh) throws IOException {
-    if (!flbaDictAvailable) return;
-    DictionaryValuesReader r = new DictionaryValuesReader(flbaDictionary);
-    r.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(flbaDictDataEncoded)));
-    for (int i = 0; i < VALUE_COUNT; i++) {
-      bh.consume(r.readBytes());
-    }
+  public void decodeIntBatch(Blackhole bh) throws IOException {
+    if (!intDictAvailable) return;
+    DictionaryValuesReader r = new DictionaryValuesReader(intDictionary);
+    r.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(intDictDataEncoded)));
+    r.readIntegers(intDest, 0, VALUE_COUNT);
+    bh.consume(intDest);
   }
-
-  // ==== DECODE BENCHMARKS (batch) ====
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
@@ -270,5 +280,99 @@ public class DictionaryDecodingBenchmark {
     r.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(doubleDictDataEncoded)));
     r.readDoubles(doubleDest, 0, VALUE_COUNT);
     bh.consume(doubleDest);
+  }
+
+  // ==== BINARY (parameterised by stringLength and cardinality) ====
+
+  @State(Scope.Thread)
+  public static class BinaryState {
+    @Param({"10", "100", "1000"})
+    public int stringLength;
+
+    @Param({"LOW", "HIGH"})
+    public String cardinality;
+
+    byte[] dictData;
+    Dictionary dictionary;
+    boolean dictAvailable;
+
+    @Setup(Level.Trial)
+    public void setup() throws IOException {
+      int distinct = "LOW".equals(cardinality) ? TestDataFactory.LOW_CARDINALITY_DISTINCT : 0;
+      Binary[] data = TestDataFactory.generateBinaryData(
+          VALUE_COUNT, stringLength, distinct, TestDataFactory.DEFAULT_SEED);
+
+      DictionaryValuesWriter.PlainBinaryDictionaryValuesWriter w =
+          new DictionaryValuesWriter.PlainBinaryDictionaryValuesWriter(
+              MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN,
+              new HeapByteBufferAllocator());
+      for (Binary v : data) {
+        w.writeBytes(v);
+      }
+      BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
+      dictData = enc.dictData;
+      dictAvailable = !enc.fellBackToPlain();
+      if (dictAvailable) {
+        dictionary = new PlainValuesDictionary.PlainBinaryDictionary(enc.dictPage);
+      }
+    }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeBinary(BinaryState state, Blackhole bh) throws IOException {
+    if (!state.dictAvailable) return;
+    DictionaryValuesReader r = new DictionaryValuesReader(state.dictionary);
+    r.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(state.dictData)));
+    for (int i = 0; i < VALUE_COUNT; i++) {
+      bh.consume(r.readBytes());
+    }
+  }
+
+  // ==== FIXED_LEN_BYTE_ARRAY (parameterised by fixedLength and cardinality) ====
+
+  @State(Scope.Thread)
+  public static class FlbaState {
+    @Param({"2", "12", "16"})
+    public int fixedLength;
+
+    @Param({"LOW", "HIGH"})
+    public String cardinality;
+
+    byte[] dictData;
+    Dictionary dictionary;
+    boolean dictAvailable;
+
+    @Setup(Level.Trial)
+    public void setup() throws IOException {
+      int distinct = "LOW".equals(cardinality) ? TestDataFactory.LOW_CARDINALITY_DISTINCT : 0;
+      Binary[] data = TestDataFactory.generateFixedLenByteArrays(
+          VALUE_COUNT, fixedLength, distinct, TestDataFactory.DEFAULT_SEED);
+
+      DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter w =
+          new DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter(
+              MAX_DICT_BYTE_SIZE, fixedLength, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN,
+              new HeapByteBufferAllocator());
+      for (Binary v : data) {
+        w.writeBytes(v);
+      }
+      BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
+      dictData = enc.dictData;
+      dictAvailable = !enc.fellBackToPlain();
+      if (dictAvailable) {
+        dictionary = new PlainValuesDictionary.PlainBinaryDictionary(enc.dictPage, fixedLength);
+      }
+    }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeFlba(FlbaState state, Blackhole bh) throws IOException {
+    if (!state.dictAvailable) return;
+    DictionaryValuesReader r = new DictionaryValuesReader(state.dictionary);
+    r.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(state.dictData)));
+    for (int i = 0; i < VALUE_COUNT; i++) {
+      bh.consume(r.readBytes());
+    }
   }
 }

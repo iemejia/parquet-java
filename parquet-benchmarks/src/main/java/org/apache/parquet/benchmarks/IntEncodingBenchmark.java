@@ -23,15 +23,9 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.TimeUnit;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.HeapByteBufferAllocator;
-import org.apache.parquet.column.Dictionary;
-import org.apache.parquet.column.Encoding;
-import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.values.ValuesWriter;
 import org.apache.parquet.column.values.delta.DeltaBinaryPackingValuesReader;
 import org.apache.parquet.column.values.delta.DeltaBinaryPackingValuesWriterForInteger;
-import org.apache.parquet.column.values.dictionary.DictionaryValuesReader;
-import org.apache.parquet.column.values.dictionary.DictionaryValuesWriter;
-import org.apache.parquet.column.values.dictionary.PlainValuesDictionary;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -48,23 +42,17 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Encoding-level and decoding-level micro-benchmarks for INT32 values.
- * Compares DELTA_BINARY_PACKED and DICTIONARY encodings across different data
- * distribution patterns. PLAIN encoding benchmarks live in
- * {@link PlainEncodingBenchmark} and {@link PlainDecodingBenchmark}.
- * BYTE_STREAM_SPLIT benchmarks live in {@link ByteStreamSplitEncodingBenchmark}
- * and {@link ByteStreamSplitDecodingBenchmark}.
- * Synthetic dictionary-id RLE decode is benchmarked separately in
- * {@link RleDictionaryIndexDecodingBenchmark} so the results here stay
- * comparable at the full-value level.
+ * Encoding and decoding micro-benchmarks for INT32 DELTA_BINARY_PACKED.
+ * Exercises delta encoding across different data distribution patterns.
+ *
+ * <p>PLAIN encoding benchmarks live in {@link PlainEncodingBenchmark} and
+ * {@link PlainDecodingBenchmark}. BYTE_STREAM_SPLIT benchmarks live in
+ * {@link ByteStreamSplitEncodingBenchmark} and
+ * {@link ByteStreamSplitDecodingBenchmark}. Dictionary benchmarks live in
+ * {@link DictionaryEncodingBenchmark} and {@link DictionaryDecodingBenchmark}.
  *
  * <p>Each benchmark invocation processes {@value #VALUE_COUNT} values. Throughput is
  * reported per-value using {@link OperationsPerInvocation}.
- *
- * <p>The dictionary encode/decode benchmarks measure the full path: the encoder
- * produces both the RLE-encoded indices and a {@link DictionaryPage}; the decoder
- * consumes the indices through a {@link DictionaryValuesReader} backed by the same
- * dictionary.
  */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -77,17 +65,12 @@ public class IntEncodingBenchmark {
   static final int VALUE_COUNT = 100_000;
   private static final int INIT_SLAB_SIZE = 64 * 1024;
   private static final int PAGE_SIZE = 1024 * 1024;
-  private static final int MAX_DICT_BYTE_SIZE = 1024 * 1024;
 
   @Param({"SEQUENTIAL", "RANDOM", "LOW_CARDINALITY", "HIGH_CARDINALITY"})
   public String dataPattern;
 
   private int[] data;
   private byte[] deltaEncoded;
-  private byte[] dictDataEncoded;
-  private DictionaryPage dictPage;
-  private Dictionary intDictionary;
-  private boolean dictionaryAvailable;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
@@ -111,19 +94,6 @@ public class IntEncodingBenchmark {
 
     // Pre-encode data for decode benchmarks
     deltaEncoded = encodeWith(newDeltaWriter());
-
-    // Pre-encode dictionary data for decode benchmark
-    DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter dictWriter = newDictWriter();
-    for (int v : data) {
-      dictWriter.writeInteger(v);
-    }
-    BenchmarkEncodingUtils.EncodedDictionary encoded = BenchmarkEncodingUtils.drainDictionary(dictWriter);
-    dictDataEncoded = encoded.dictData;
-    dictPage = encoded.dictPage;
-    dictionaryAvailable = !encoded.fellBackToPlain();
-    if (dictionaryAvailable) {
-      intDictionary = new PlainValuesDictionary.PlainIntegerDictionary(dictPage);
-    }
   }
 
   private byte[] encodeWith(ValuesWriter writer) throws IOException {
@@ -135,23 +105,10 @@ public class IntEncodingBenchmark {
     return bytes;
   }
 
-  private BenchmarkEncodingUtils.EncodedDictionary encodeDictionaryWith(
-      DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter writer) throws IOException {
-    for (int v : data) {
-      writer.writeInteger(v);
-    }
-    return BenchmarkEncodingUtils.drainDictionary(writer);
-  }
-
   // ---- Writer factories ----
 
   private static DeltaBinaryPackingValuesWriterForInteger newDeltaWriter() {
     return new DeltaBinaryPackingValuesWriterForInteger(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
-  }
-
-  private static DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter newDictWriter() {
-    return new DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter(
-        MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
   }
 
   // ---- Encode benchmarks ----
@@ -162,14 +119,6 @@ public class IntEncodingBenchmark {
     return encodeWith(newDeltaWriter());
   }
 
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void encodeDictionary(Blackhole bh) throws IOException {
-    BenchmarkEncodingUtils.EncodedDictionary encoded = encodeDictionaryWith(newDictWriter());
-    bh.consume(encoded.dictData);
-    bh.consume(encoded.dictPage);
-  }
-
   // ---- Decode benchmarks ----
 
   @Benchmark
@@ -177,21 +126,6 @@ public class IntEncodingBenchmark {
   public void decodeDelta(Blackhole bh) throws IOException {
     DeltaBinaryPackingValuesReader reader = new DeltaBinaryPackingValuesReader();
     reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(deltaEncoded)));
-    for (int i = 0; i < VALUE_COUNT; i++) {
-      bh.consume(reader.readInteger());
-    }
-  }
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void decodeDictionary(Blackhole bh) throws IOException {
-    if (!dictionaryAvailable) {
-      // Dictionary fell back to plain encoding (e.g. very large unique-value sets
-      // exceeding MAX_DICT_BYTE_SIZE). Skip to keep the benchmark meaningful.
-      return;
-    }
-    DictionaryValuesReader reader = new DictionaryValuesReader(intDictionary);
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(dictDataEncoded)));
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(reader.readInteger());
     }

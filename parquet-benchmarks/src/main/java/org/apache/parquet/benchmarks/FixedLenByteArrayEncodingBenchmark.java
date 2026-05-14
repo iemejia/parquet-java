@@ -23,15 +23,9 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.TimeUnit;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.HeapByteBufferAllocator;
-import org.apache.parquet.column.Dictionary;
-import org.apache.parquet.column.Encoding;
-import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.values.ValuesWriter;
 import org.apache.parquet.column.values.deltastrings.DeltaByteArrayReader;
 import org.apache.parquet.column.values.deltastrings.DeltaByteArrayWriter;
-import org.apache.parquet.column.values.dictionary.DictionaryValuesReader;
-import org.apache.parquet.column.values.dictionary.DictionaryValuesWriter;
-import org.apache.parquet.column.values.dictionary.PlainValuesDictionary;
 import org.apache.parquet.io.api.Binary;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -49,28 +43,23 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Encoding-level micro-benchmarks for FIXED_LEN_BYTE_ARRAY (FLBA) values across
- * the non-PLAIN supported encodings: DELTA_BYTE_ARRAY and DICTIONARY.
- * PLAIN encoding benchmarks live in {@link PlainEncodingBenchmark} and
- * {@link PlainDecodingBenchmark}. BYTE_STREAM_SPLIT benchmarks live in
- * {@link ByteStreamSplitEncodingBenchmark} and
- * {@link ByteStreamSplitDecodingBenchmark}.
- *
- * <p>Each benchmark invocation processes {@value #VALUE_COUNT} values; throughput is
- * reported per-value via {@link OperationsPerInvocation}.
- *
- * <p>The {@code fixedLength} parameter exercises key FLBA sizes:
+ * Encoding and decoding micro-benchmarks for FIXED_LEN_BYTE_ARRAY (FLBA) values
+ * using DELTA_BYTE_ARRAY encoding. Exercises different FLBA sizes that map to
+ * common logical types:
  * <ul>
  *   <li>2 = FLOAT16</li>
  *   <li>12 = INT96 (legacy timestamps)</li>
  *   <li>16 = UUID</li>
  * </ul>
  *
- * <p>The {@code dataPattern} parameter controls cardinality:
- * <ul>
- *   <li>RANDOM = all unique values</li>
- *   <li>LOW_CARDINALITY = 100 distinct values (favors dictionary and delta)</li>
- * </ul>
+ * <p>PLAIN encoding benchmarks live in {@link PlainEncodingBenchmark} and
+ * {@link PlainDecodingBenchmark}. BYTE_STREAM_SPLIT benchmarks live in
+ * {@link ByteStreamSplitEncodingBenchmark} and
+ * {@link ByteStreamSplitDecodingBenchmark}. Dictionary benchmarks live in
+ * {@link DictionaryEncodingBenchmark} and {@link DictionaryDecodingBenchmark}.
+ *
+ * <p>Each benchmark invocation processes {@value #VALUE_COUNT} values; throughput is
+ * reported per-value via {@link OperationsPerInvocation}.
  */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -83,33 +72,20 @@ public class FixedLenByteArrayEncodingBenchmark {
   static final int VALUE_COUNT = 100_000;
   private static final int INIT_SLAB_SIZE = 64 * 1024;
   private static final int PAGE_SIZE = 4 * 1024 * 1024;
-  private static final int MAX_DICT_BYTE_SIZE = 4 * 1024 * 1024;
 
   @Param({"2", "12", "16"})
   public int fixedLength;
 
-  @Param({"RANDOM", "LOW_CARDINALITY"})
-  public String dataPattern;
-
   private Binary[] data;
-
-  // Pre-encoded pages for decode benchmarks
   private byte[] deltaEncoded;
-  private byte[] dictDataEncoded;
-  private Dictionary flbaDictionary;
-  private boolean dictAvailable;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
-    int distinct = "LOW_CARDINALITY".equals(dataPattern)
-        ? TestDataFactory.LOW_CARDINALITY_DISTINCT
-        : 0;
     data = TestDataFactory.generateFixedLenByteArrays(
-        VALUE_COUNT, fixedLength, distinct, TestDataFactory.DEFAULT_SEED);
+        VALUE_COUNT, fixedLength, 0, TestDataFactory.DEFAULT_SEED);
 
     // Pre-encode for decode benchmarks
     deltaEncoded = encodeWith(newDeltaWriter());
-    setupDict();
   }
 
   private byte[] encodeWith(ValuesWriter writer) throws IOException {
@@ -119,22 +95,6 @@ public class FixedLenByteArrayEncodingBenchmark {
     byte[] bytes = writer.getBytes().toByteArray();
     writer.close();
     return bytes;
-  }
-
-  private void setupDict() throws IOException {
-    DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter w =
-        new DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter(
-            MAX_DICT_BYTE_SIZE, fixedLength, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN,
-            new HeapByteBufferAllocator());
-    for (Binary v : data) {
-      w.writeBytes(v);
-    }
-    BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
-    dictDataEncoded = enc.dictData;
-    dictAvailable = !enc.fellBackToPlain();
-    if (dictAvailable) {
-      flbaDictionary = new PlainValuesDictionary.PlainBinaryDictionary(enc.dictPage, fixedLength);
-    }
   }
 
   // ---- Writer factories ----
@@ -151,21 +111,6 @@ public class FixedLenByteArrayEncodingBenchmark {
     return encodeWith(newDeltaWriter());
   }
 
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void encodeDictionary(Blackhole bh) throws IOException {
-    DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter w =
-        new DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter(
-            MAX_DICT_BYTE_SIZE, fixedLength, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN,
-            new HeapByteBufferAllocator());
-    for (Binary v : data) {
-      w.writeBytes(v);
-    }
-    BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
-    bh.consume(enc.dictData);
-    bh.consume(enc.dictPage);
-  }
-
   // ==== DECODE BENCHMARKS ====
 
   @Benchmark
@@ -173,17 +118,6 @@ public class FixedLenByteArrayEncodingBenchmark {
   public void decodeDelta(Blackhole bh) throws IOException {
     DeltaByteArrayReader reader = new DeltaByteArrayReader();
     reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(deltaEncoded)));
-    for (int i = 0; i < VALUE_COUNT; i++) {
-      bh.consume(reader.readBytes());
-    }
-  }
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void decodeDictionary(Blackhole bh) throws IOException {
-    if (!dictAvailable) return;
-    DictionaryValuesReader reader = new DictionaryValuesReader(flbaDictionary);
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(dictDataEncoded)));
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(reader.readBytes());
     }
