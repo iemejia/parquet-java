@@ -78,8 +78,7 @@ public class DeltaLengthByteArrayDecodingBenchmark {
     Binary[] data;
     switch (dataPattern) {
       case "UNIFORM_LENGTH":
-        data = TestDataFactory.generateBinaryData(
-            VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
+        data = TestDataFactory.generateBinaryData(VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
         break;
       case "VARIABLE_LENGTH":
         data = TestDataFactory.generateVariableLengthBinaryData(
@@ -89,8 +88,7 @@ public class DeltaLengthByteArrayDecodingBenchmark {
         throw new IllegalArgumentException("Unknown data pattern: " + dataPattern);
     }
 
-    ValuesWriter w = new DeltaLengthByteArrayValuesWriter(
-        INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    ValuesWriter w = new DeltaLengthByteArrayValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
     for (Binary v : data) {
       w.writeBytes(v);
     }

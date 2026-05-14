@@ -409,8 +409,7 @@ public final class TestDataFactory {
     Binary[] data = new Binary[count];
     for (int i = 0; i < count; i++) {
       int length = 1 + random.nextInt(maxLength);
-      data[i] = Binary.fromConstantByteArray(
-          randomString(length, random).getBytes(StandardCharsets.UTF_8));
+      data[i] = Binary.fromConstantByteArray(randomString(length, random).getBytes(StandardCharsets.UTF_8));
     }
     return data;
   }

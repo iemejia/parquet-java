@@ -78,8 +78,7 @@ public class DeltaLengthByteArrayEncodingBenchmark {
   public void setup() {
     switch (dataPattern) {
       case "UNIFORM_LENGTH":
-        data = TestDataFactory.generateBinaryData(
-            VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
+        data = TestDataFactory.generateBinaryData(VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
         break;
       case "VARIABLE_LENGTH":
         data = TestDataFactory.generateVariableLengthBinaryData(
