@@ -65,34 +65,68 @@ public class DeltaByteArrayEncodingBenchmark {
 
   // ---- Inner state classes ----
 
-  /** BINARY data parameterized by string length. */
+  /**
+   * BINARY data parameterized by string length and data pattern. Sorted data
+   * exercises prefix sharing (the encoding's primary design intent); random
+   * data is the worst case with no shared prefixes.
+   */
   @State(Scope.Thread)
   public static class BinaryState {
 
     @Param({"10", "100", "1000"})
     public int stringLength;
 
+    @Param({"RANDOM", "SORTED"})
+    public String dataPattern;
+
     Binary[] data;
 
     @Setup(Level.Trial)
     public void setup() {
-      data = TestDataFactory.generateBinaryData(VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
+      switch (dataPattern) {
+        case "RANDOM":
+          data = TestDataFactory.generateBinaryData(
+              VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
+          break;
+        case "SORTED":
+          data = TestDataFactory.generateSortedBinaryData(
+              VALUE_COUNT, stringLength, TestDataFactory.DEFAULT_SEED);
+          break;
+        default:
+          throw new IllegalArgumentException("Unknown data pattern: " + dataPattern);
+      }
     }
   }
 
-  /** FIXED_LEN_BYTE_ARRAY data parameterized by fixed length (FLOAT16 / INT96 / UUID). */
+  /**
+   * FIXED_LEN_BYTE_ARRAY data parameterized by fixed length and data pattern.
+   * Fixed lengths map to common logical types: 2 = FLOAT16, 12 = INT96, 16 = UUID.
+   */
   @State(Scope.Thread)
   public static class FlbaState {
 
     @Param({"2", "12", "16"})
     public int fixedLength;
 
+    @Param({"RANDOM", "SORTED"})
+    public String dataPattern;
+
     Binary[] data;
 
     @Setup(Level.Trial)
     public void setup() {
-      data = TestDataFactory.generateFixedLenByteArrays(
-          VALUE_COUNT, fixedLength, 0, TestDataFactory.DEFAULT_SEED);
+      switch (dataPattern) {
+        case "RANDOM":
+          data = TestDataFactory.generateFixedLenByteArrays(
+              VALUE_COUNT, fixedLength, 0, TestDataFactory.DEFAULT_SEED);
+          break;
+        case "SORTED":
+          data = TestDataFactory.generateSortedFixedLenByteArrays(
+              VALUE_COUNT, fixedLength, TestDataFactory.DEFAULT_SEED);
+          break;
+        default:
+          throw new IllegalArgumentException("Unknown data pattern: " + dataPattern);
+      }
     }
   }
 

@@ -69,19 +69,37 @@ public class DeltaByteArrayDecodingBenchmark {
 
   // ---- Inner state classes ----
 
-  /** Pre-encoded BINARY pages parameterized by string length. */
+  /**
+   * Pre-encoded BINARY pages parameterized by string length and data pattern.
+   * Sorted data produces pages with extensive prefix sharing; random data
+   * produces pages with no shared prefixes.
+   */
   @State(Scope.Thread)
   public static class BinaryState {
 
     @Param({"10", "100", "1000"})
     public int stringLength;
 
+    @Param({"RANDOM", "SORTED"})
+    public String dataPattern;
+
     byte[] encoded;
 
     @Setup(Level.Trial)
     public void setup() throws IOException {
-      Binary[] data =
-          TestDataFactory.generateBinaryData(VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
+      Binary[] data;
+      switch (dataPattern) {
+        case "RANDOM":
+          data = TestDataFactory.generateBinaryData(
+              VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
+          break;
+        case "SORTED":
+          data = TestDataFactory.generateSortedBinaryData(
+              VALUE_COUNT, stringLength, TestDataFactory.DEFAULT_SEED);
+          break;
+        default:
+          throw new IllegalArgumentException("Unknown data pattern: " + dataPattern);
+      }
 
       ValuesWriter w = new DeltaByteArrayWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
       for (Binary v : data) {
@@ -92,19 +110,37 @@ public class DeltaByteArrayDecodingBenchmark {
     }
   }
 
-  /** Pre-encoded FIXED_LEN_BYTE_ARRAY pages parameterized by fixed length. */
+  /**
+   * Pre-encoded FIXED_LEN_BYTE_ARRAY pages parameterized by fixed length and
+   * data pattern. Fixed lengths map to common logical types: 2 = FLOAT16,
+   * 12 = INT96, 16 = UUID.
+   */
   @State(Scope.Thread)
   public static class FlbaState {
 
     @Param({"2", "12", "16"})
     public int fixedLength;
 
+    @Param({"RANDOM", "SORTED"})
+    public String dataPattern;
+
     byte[] encoded;
 
     @Setup(Level.Trial)
     public void setup() throws IOException {
-      Binary[] data = TestDataFactory.generateFixedLenByteArrays(
-          VALUE_COUNT, fixedLength, 0, TestDataFactory.DEFAULT_SEED);
+      Binary[] data;
+      switch (dataPattern) {
+        case "RANDOM":
+          data = TestDataFactory.generateFixedLenByteArrays(
+              VALUE_COUNT, fixedLength, 0, TestDataFactory.DEFAULT_SEED);
+          break;
+        case "SORTED":
+          data = TestDataFactory.generateSortedFixedLenByteArrays(
+              VALUE_COUNT, fixedLength, TestDataFactory.DEFAULT_SEED);
+          break;
+        default:
+          throw new IllegalArgumentException("Unknown data pattern: " + dataPattern);
+      }
 
       ValuesWriter w = new DeltaByteArrayWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
       for (Binary v : data) {

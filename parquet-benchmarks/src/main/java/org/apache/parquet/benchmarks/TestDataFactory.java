@@ -26,6 +26,7 @@ import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT32;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Random;
 import org.apache.parquet.example.data.Group;
 import org.apache.parquet.example.data.simple.SimpleGroupFactory;
@@ -364,6 +365,30 @@ public final class TestDataFactory {
             randomString(stringLength, random).getBytes(StandardCharsets.UTF_8));
       }
     }
+    return data;
+  }
+
+  // ---- Sorted data generation for delta encoding benchmarks ----
+
+  /**
+   * Generates all-unique binary strings of the given length, sorted in natural
+   * ({@link Binary#compareTo}) order. Useful for benchmarking DELTA_BYTE_ARRAY
+   * encoding, which benefits from prefix sharing between consecutive values.
+   */
+  public static Binary[] generateSortedBinaryData(int count, int stringLength, long seed) {
+    Binary[] data = generateBinaryData(count, stringLength, 0, seed);
+    Arrays.sort(data);
+    return data;
+  }
+
+  /**
+   * Generates all-unique fixed-length byte arrays, sorted in natural
+   * ({@link Binary#compareTo}) order. Useful for benchmarking DELTA_BYTE_ARRAY
+   * encoding with FIXED_LEN_BYTE_ARRAY values.
+   */
+  public static Binary[] generateSortedFixedLenByteArrays(int count, int fixedLength, long seed) {
+    Binary[] data = generateFixedLenByteArrays(count, fixedLength, 0, seed);
+    Arrays.sort(data);
     return data;
   }
 
