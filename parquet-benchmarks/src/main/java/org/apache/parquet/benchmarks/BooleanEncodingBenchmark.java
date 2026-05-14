@@ -26,8 +26,6 @@ import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.HeapByteBufferAllocator;
 import org.apache.parquet.column.values.ValuesReader;
 import org.apache.parquet.column.values.ValuesWriter;
-import org.apache.parquet.column.values.plain.BooleanPlainValuesReader;
-import org.apache.parquet.column.values.plain.BooleanPlainValuesWriter;
 import org.apache.parquet.column.values.rle.RunLengthBitPackingHybridValuesReader;
 import org.apache.parquet.column.values.rle.RunLengthBitPackingHybridValuesWriter;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -48,14 +46,15 @@ import org.openjdk.jmh.infra.Blackhole;
 /**
  * Characterization benchmarks for BOOLEAN encoding in Parquet.
  *
- * <p>BOOLEAN columns use two distinct encoding paths:
+ * <p>This benchmark covers the V2 (RLE) encoding path:
  * <ul>
- *   <li><b>V1 (PLAIN):</b> {@link BooleanPlainValuesWriter} delegates to
- *       {@code ByteBitPackingValuesWriter(bitWidth=1)}. Always bit-packs.</li>
  *   <li><b>V2 (RLE):</b> {@link RunLengthBitPackingHybridValuesWriter} with
  *       {@code bitWidth=1}. Uses the RLE/bit-packing hybrid, which can
  *       run-length encode long runs of identical values.</li>
  * </ul>
+ *
+ * <p>V1 (PLAIN) boolean encoding benchmarks are in {@link PlainEncodingBenchmark}
+ * and {@link PlainDecodingBenchmark}.
  *
  * <p>The {@code dataPattern} parameter exercises RLE's best cases (ALL_TRUE,
  * ALL_FALSE), worst case (ALTERNATING), and realistic distributions (RANDOM,
@@ -80,7 +79,6 @@ public class BooleanEncodingBenchmark {
   public String dataPattern;
 
   private boolean[] data;
-  private byte[] v1Page;
   private byte[] v2Page;
 
   // Pre-allocated batch destination array
@@ -89,7 +87,6 @@ public class BooleanEncodingBenchmark {
   @Setup(Level.Trial)
   public void setup() throws IOException {
     data = generateData(dataPattern);
-    v1Page = encodeV1(data);
     v2Page = encodeV2(data);
     boolDest = new boolean[VALUE_COUNT];
   }
@@ -122,16 +119,6 @@ public class BooleanEncodingBenchmark {
     return d;
   }
 
-  private static byte[] encodeV1(boolean[] values) throws IOException {
-    ValuesWriter w = new BooleanPlainValuesWriter();
-    for (boolean v : values) {
-      w.writeBoolean(v);
-    }
-    byte[] bytes = w.getBytes().toByteArray();
-    w.close();
-    return bytes;
-  }
-
   private static byte[] encodeV2(boolean[] values) throws IOException {
     ValuesWriter w = new RunLengthBitPackingHybridValuesWriter(
         1, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
@@ -147,24 +134,8 @@ public class BooleanEncodingBenchmark {
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public byte[] encodePlainV1() throws IOException {
-    return encodeV1(data);
-  }
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
   public byte[] encodeRleV2() throws IOException {
     return encodeV2(data);
-  }
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public byte[] encodePlainV1Batch() throws IOException {
-    ValuesWriter w = new BooleanPlainValuesWriter();
-    w.writeBooleans(data, 0, data.length);
-    byte[] bytes = w.getBytes().toByteArray();
-    w.close();
-    return bytes;
   }
 
   @Benchmark
@@ -182,16 +153,6 @@ public class BooleanEncodingBenchmark {
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public void decodePlainV1(Blackhole bh) throws IOException {
-    ValuesReader r = new BooleanPlainValuesReader();
-    r.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(v1Page)));
-    for (int i = 0; i < VALUE_COUNT; i++) {
-      bh.consume(r.readBoolean());
-    }
-  }
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
   public void decodeRleV2(Blackhole bh) throws IOException {
     ValuesReader r = new RunLengthBitPackingHybridValuesReader(1);
     r.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(v2Page)));
@@ -201,15 +162,6 @@ public class BooleanEncodingBenchmark {
   }
 
   // ---- Batch decode benchmarks ----
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void decodePlainV1Batch(Blackhole bh) throws IOException {
-    ValuesReader r = new BooleanPlainValuesReader();
-    r.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(v1Page)));
-    r.readBooleans(boolDest, 0, VALUE_COUNT);
-    bh.consume(boolDest);
-  }
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)

@@ -22,7 +22,11 @@ import java.io.IOException;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import org.apache.parquet.bytes.HeapByteBufferAllocator;
+import org.apache.parquet.column.values.ValuesWriter;
+import org.apache.parquet.column.values.plain.BooleanPlainValuesWriter;
+import org.apache.parquet.column.values.plain.FixedLenByteArrayPlainValuesWriter;
 import org.apache.parquet.column.values.plain.PlainValuesWriter;
+import org.apache.parquet.io.api.Binary;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -37,13 +41,18 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
 
 /**
- * Encoding micro-benchmarks for the PLAIN encoding across the four numeric primitive
- * types: {@code INT32}, {@code INT64}, {@code FLOAT}, {@code DOUBLE}.
+ * Encoding micro-benchmarks for the PLAIN encoding across all Parquet primitive types:
+ * {@code BOOLEAN}, {@code INT32}, {@code INT64}, {@code FLOAT}, {@code DOUBLE},
+ * {@code BINARY}, and {@code FIXED_LEN_BYTE_ARRAY}.
  *
- * <p>Compares per-value scalar writes vs bulk batch writes using
- * {@link PlainValuesWriter}'s {@code writeIntegers}, {@code writeLongs},
- * {@code writeFloats}, {@code writeDoubles} methods backed by bulk
- * {@code ByteBuffer} view transfers in {@code CapacityByteArrayOutputStream}.
+ * <p>Compares per-value scalar writes vs bulk batch writes where batch APIs are
+ * available. Batch writes use bulk {@code ByteBuffer} view transfers in
+ * {@code CapacityByteArrayOutputStream}.
+ *
+ * <p>BOOLEAN uses {@link BooleanPlainValuesWriter} which delegates to bit-packing.
+ * BINARY uses {@link PlainValuesWriter} (length-prefixed bytes).
+ * FIXED_LEN_BYTE_ARRAY uses {@link FixedLenByteArrayPlainValuesWriter} with a
+ * representative fixed length of 16 (UUID-sized values).
  */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -55,30 +64,76 @@ public class PlainEncodingBenchmark {
 
   static final int VALUE_COUNT = 100_000;
   private static final int INIT_SLAB_SIZE = 64 * 1024;
-  private static final int PAGE_SIZE = 1024 * 1024;
+  private static final int PAGE_SIZE = 4 * 1024 * 1024;
 
+  /** Representative string length for BINARY benchmarks. */
+  private static final int BINARY_STRING_LENGTH = 100;
+
+  /** Representative fixed length for FLBA benchmarks (UUID-sized). */
+  private static final int FLBA_LENGTH = 16;
+
+  private boolean[] boolData;
   private int[] intData;
   private long[] longData;
   private float[] floatData;
   private double[] doubleData;
+  private Binary[] binaryData;
+  private Binary[] flbaData;
 
   @Setup(Level.Trial)
   public void setup() {
     Random r = new Random(42);
+    boolData = new boolean[VALUE_COUNT];
     intData = new int[VALUE_COUNT];
     longData = new long[VALUE_COUNT];
     floatData = new float[VALUE_COUNT];
     doubleData = new double[VALUE_COUNT];
     for (int i = 0; i < VALUE_COUNT; i++) {
+      boolData[i] = r.nextBoolean();
       intData[i] = r.nextInt();
       longData[i] = r.nextLong();
       floatData[i] = r.nextFloat();
       doubleData[i] = r.nextDouble();
     }
+    binaryData = TestDataFactory.generateBinaryData(VALUE_COUNT, BINARY_STRING_LENGTH, 0, TestDataFactory.DEFAULT_SEED);
+    flbaData = TestDataFactory.generateFixedLenByteArrays(VALUE_COUNT, FLBA_LENGTH, 0, TestDataFactory.DEFAULT_SEED);
   }
 
   private static PlainValuesWriter newWriter() {
     return new PlainValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+  }
+
+  private static BooleanPlainValuesWriter newBoolWriter() {
+    return new BooleanPlainValuesWriter();
+  }
+
+  private FixedLenByteArrayPlainValuesWriter newFlbaWriter() {
+    return new FixedLenByteArrayPlainValuesWriter(
+        FLBA_LENGTH, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+  }
+
+  // ---- BOOLEAN ----
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeBoolean() throws IOException {
+    ValuesWriter w = newBoolWriter();
+    for (boolean v : boolData) {
+      w.writeBoolean(v);
+    }
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeBooleanBatch() throws IOException {
+    ValuesWriter w = newBoolWriter();
+    w.writeBooleans(boolData, 0, boolData.length);
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
   }
 
   // ---- INT32 ----
@@ -172,6 +227,44 @@ public class PlainEncodingBenchmark {
   public byte[] encodeDoubleBatch() throws IOException {
     PlainValuesWriter w = newWriter();
     w.writeDoubles(doubleData, 0, VALUE_COUNT);
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  // ---- BINARY ----
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeBinary() throws IOException {
+    PlainValuesWriter w = newWriter();
+    for (Binary v : binaryData) {
+      w.writeBytes(v);
+    }
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  // ---- FIXED_LEN_BYTE_ARRAY ----
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeFixedLenByteArray() throws IOException {
+    FixedLenByteArrayPlainValuesWriter w = newFlbaWriter();
+    for (Binary v : flbaData) {
+      w.writeBytes(v);
+    }
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeFixedLenByteArrayBatch() throws IOException {
+    FixedLenByteArrayPlainValuesWriter w = newFlbaWriter();
+    w.writeBinaries(flbaData, 0, flbaData.length);
     byte[] bytes = w.getBytes().toByteArray();
     w.close();
     return bytes;

@@ -34,8 +34,6 @@ import org.apache.parquet.column.values.deltastrings.DeltaByteArrayWriter;
 import org.apache.parquet.column.values.dictionary.DictionaryValuesReader;
 import org.apache.parquet.column.values.dictionary.DictionaryValuesWriter;
 import org.apache.parquet.column.values.dictionary.PlainValuesDictionary;
-import org.apache.parquet.column.values.plain.BinaryPlainValuesReader;
-import org.apache.parquet.column.values.plain.PlainValuesWriter;
 import org.apache.parquet.io.api.Binary;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -54,8 +52,9 @@ import org.openjdk.jmh.infra.Blackhole;
 
 /**
  * Encoding-level and decoding-level micro-benchmarks for BINARY values.
- * Compares PLAIN, DELTA_BYTE_ARRAY, DELTA_LENGTH_BYTE_ARRAY, and DICTIONARY encodings
- * across different string lengths and cardinality patterns.
+ * Compares DELTA_BYTE_ARRAY, DELTA_LENGTH_BYTE_ARRAY, and DICTIONARY encodings
+ * across different string lengths and cardinality patterns. PLAIN encoding
+ * benchmarks live in {@link PlainEncodingBenchmark} and {@link PlainDecodingBenchmark}.
  *
  * <p>Each benchmark invocation processes {@value #VALUE_COUNT} values. Throughput is
  * reported per-value using {@link OperationsPerInvocation}.
@@ -89,7 +88,6 @@ public class BinaryEncodingBenchmark {
   public String cardinality;
 
   private Binary[] data;
-  private byte[] plainEncoded;
   private byte[] deltaLengthEncoded;
   private byte[] deltaStringsEncoded;
   private byte[] dictEncoded;
@@ -103,7 +101,6 @@ public class BinaryEncodingBenchmark {
     data = TestDataFactory.generateBinaryData(VALUE_COUNT, stringLength, distinct, TestDataFactory.DEFAULT_SEED);
 
     // Pre-encode data for decode benchmarks
-    plainEncoded = encodeBinaryWith(newPlainWriter());
     deltaLengthEncoded = encodeBinaryWith(newDeltaLengthWriter());
     deltaStringsEncoded = encodeBinaryWith(newDeltaStringsWriter());
 
@@ -139,10 +136,6 @@ public class BinaryEncodingBenchmark {
 
   // ---- Writer factories ----
 
-  private static PlainValuesWriter newPlainWriter() {
-    return new PlainValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
-  }
-
   private static DeltaLengthByteArrayValuesWriter newDeltaLengthWriter() {
     return new DeltaLengthByteArrayValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
   }
@@ -157,12 +150,6 @@ public class BinaryEncodingBenchmark {
   }
 
   // ---- Encode benchmarks ----
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public byte[] encodePlain() throws IOException {
-    return encodeBinaryWith(newPlainWriter());
-  }
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
@@ -185,16 +172,6 @@ public class BinaryEncodingBenchmark {
   }
 
   // ---- Decode benchmarks ----
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void decodePlain(Blackhole bh) throws IOException {
-    BinaryPlainValuesReader reader = new BinaryPlainValuesReader();
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(plainEncoded)));
-    for (int i = 0; i < VALUE_COUNT; i++) {
-      bh.consume(reader.readBytes());
-    }
-  }
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)

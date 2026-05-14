@@ -24,8 +24,16 @@ import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.HeapByteBufferAllocator;
+import org.apache.parquet.column.values.ValuesReader;
+import org.apache.parquet.column.values.ValuesWriter;
+import org.apache.parquet.column.values.plain.BinaryPlainValuesReader;
+import org.apache.parquet.column.values.plain.BooleanPlainValuesReader;
+import org.apache.parquet.column.values.plain.BooleanPlainValuesWriter;
+import org.apache.parquet.column.values.plain.FixedLenByteArrayPlainValuesReader;
+import org.apache.parquet.column.values.plain.FixedLenByteArrayPlainValuesWriter;
 import org.apache.parquet.column.values.plain.PlainValuesReader;
 import org.apache.parquet.column.values.plain.PlainValuesWriter;
+import org.apache.parquet.io.api.Binary;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -41,16 +49,18 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Decoding micro-benchmarks for the PLAIN encoding across the four numeric primitive
- * types: {@code INT32}, {@code INT64}, {@code FLOAT}, {@code DOUBLE}.
+ * Decoding micro-benchmarks for the PLAIN encoding across all Parquet primitive types:
+ * {@code BOOLEAN}, {@code INT32}, {@code INT64}, {@code FLOAT}, {@code DOUBLE},
+ * {@code BINARY}, and {@code FIXED_LEN_BYTE_ARRAY}.
  *
  * <p>Each invocation decodes {@value #VALUE_COUNT} values. Per-value methods measure
  * scalar read throughput; batch methods measure bulk array-fill throughput using
- * {@link PlainValuesReader}'s bulk {@code ByteBuffer} view reads.
+ * bulk {@code ByteBuffer} view reads where available.
  *
- * <p>INT32 per-value and batch decode are also available in {@link IntEncodingBenchmark}
- * alongside other INT32 encodings. This benchmark focuses on the PLAIN encoding path
- * for all four types to validate the bulk view buffer optimization uniformly.
+ * <p>BOOLEAN uses {@link BooleanPlainValuesReader} (bit-unpacking).
+ * BINARY uses {@link BinaryPlainValuesReader} (length-prefixed bytes).
+ * FIXED_LEN_BYTE_ARRAY uses {@link FixedLenByteArrayPlainValuesReader} with a
+ * representative fixed length of 16 (UUID-sized values).
  */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -62,60 +72,138 @@ public class PlainDecodingBenchmark {
 
   static final int VALUE_COUNT = 100_000;
   private static final int INIT_SLAB_SIZE = 64 * 1024;
-  private static final int PAGE_SIZE = 1024 * 1024;
+  private static final int PAGE_SIZE = 4 * 1024 * 1024;
 
+  /** Representative string length for BINARY benchmarks. */
+  private static final int BINARY_STRING_LENGTH = 100;
+
+  /** Representative fixed length for FLBA benchmarks (UUID-sized). */
+  private static final int FLBA_LENGTH = 16;
+
+  // Pre-encoded pages
+  private byte[] boolPage;
   private byte[] intPage;
   private byte[] longPage;
   private byte[] floatPage;
   private byte[] doublePage;
+  private byte[] binaryPage;
+  private byte[] flbaPage;
 
   // Pre-allocated destination arrays to avoid per-invocation allocation noise
+  private boolean[] boolDest;
   private int[] intDest;
   private long[] longDest;
   private float[] floatDest;
   private double[] doubleDest;
+  private Binary[] flbaDest;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
     Random r = new Random(42);
 
     // Pre-allocate destination arrays
+    boolDest = new boolean[VALUE_COUNT];
     intDest = new int[VALUE_COUNT];
     longDest = new long[VALUE_COUNT];
     floatDest = new float[VALUE_COUNT];
     doubleDest = new double[VALUE_COUNT];
+    flbaDest = new Binary[VALUE_COUNT];
+
+    // Encode BOOLEAN
+    {
+      ValuesWriter w = new BooleanPlainValuesWriter();
+      for (int i = 0; i < VALUE_COUNT; i++) {
+        w.writeBoolean(r.nextBoolean());
+      }
+      boolPage = w.getBytes().toByteArray();
+      w.close();
+    }
 
     // Encode INT32
-    PlainValuesWriter w = new PlainValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
-    for (int i = 0; i < VALUE_COUNT; i++) {
-      w.writeInteger(r.nextInt());
+    {
+      PlainValuesWriter w = new PlainValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+      for (int i = 0; i < VALUE_COUNT; i++) {
+        w.writeInteger(r.nextInt());
+      }
+      intPage = w.getBytes().toByteArray();
+      w.close();
     }
-    intPage = w.getBytes().toByteArray();
-    w.close();
 
     // Encode INT64
-    w = new PlainValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
-    for (int i = 0; i < VALUE_COUNT; i++) {
-      w.writeLong(r.nextLong());
+    {
+      PlainValuesWriter w = new PlainValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+      for (int i = 0; i < VALUE_COUNT; i++) {
+        w.writeLong(r.nextLong());
+      }
+      longPage = w.getBytes().toByteArray();
+      w.close();
     }
-    longPage = w.getBytes().toByteArray();
-    w.close();
 
     // Encode FLOAT
-    w = new PlainValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
-    for (int i = 0; i < VALUE_COUNT; i++) {
-      w.writeFloat(r.nextFloat());
+    {
+      PlainValuesWriter w = new PlainValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+      for (int i = 0; i < VALUE_COUNT; i++) {
+        w.writeFloat(r.nextFloat());
+      }
+      floatPage = w.getBytes().toByteArray();
+      w.close();
     }
-    floatPage = w.getBytes().toByteArray();
-    w.close();
 
     // Encode DOUBLE
-    w = new PlainValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
-    for (int i = 0; i < VALUE_COUNT; i++) {
-      w.writeDouble(r.nextDouble());
+    {
+      PlainValuesWriter w = new PlainValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+      for (int i = 0; i < VALUE_COUNT; i++) {
+        w.writeDouble(r.nextDouble());
+      }
+      doublePage = w.getBytes().toByteArray();
+      w.close();
     }
-    doublePage = w.getBytes().toByteArray();
-    w.close();
+
+    // Encode BINARY
+    {
+      Binary[] data = TestDataFactory.generateBinaryData(
+          VALUE_COUNT, BINARY_STRING_LENGTH, 0, TestDataFactory.DEFAULT_SEED);
+      PlainValuesWriter w = new PlainValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+      for (Binary v : data) {
+        w.writeBytes(v);
+      }
+      binaryPage = w.getBytes().toByteArray();
+      w.close();
+    }
+
+    // Encode FIXED_LEN_BYTE_ARRAY
+    {
+      Binary[] data = TestDataFactory.generateFixedLenByteArrays(
+          VALUE_COUNT, FLBA_LENGTH, 0, TestDataFactory.DEFAULT_SEED);
+      FixedLenByteArrayPlainValuesWriter w = new FixedLenByteArrayPlainValuesWriter(
+          FLBA_LENGTH, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+      for (Binary v : data) {
+        w.writeBytes(v);
+      }
+      flbaPage = w.getBytes().toByteArray();
+      w.close();
+    }
+  }
+
+  // ---- BOOLEAN ----
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeBoolean(Blackhole bh) throws IOException {
+    ValuesReader reader = new BooleanPlainValuesReader();
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(boolPage)));
+    for (int i = 0; i < VALUE_COUNT; i++) {
+      bh.consume(reader.readBoolean());
+    }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeBooleanBatch(Blackhole bh) throws IOException {
+    ValuesReader reader = new BooleanPlainValuesReader();
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(boolPage)));
+    reader.readBooleans(boolDest, 0, VALUE_COUNT);
+    bh.consume(boolDest);
   }
 
   // ---- INT32 ----
@@ -200,5 +288,38 @@ public class PlainDecodingBenchmark {
     reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(doublePage)));
     reader.readDoubles(doubleDest, 0, VALUE_COUNT);
     return doubleDest;
+  }
+
+  // ---- BINARY ----
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeBinary(Blackhole bh) throws IOException {
+    BinaryPlainValuesReader reader = new BinaryPlainValuesReader();
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(binaryPage)));
+    for (int i = 0; i < VALUE_COUNT; i++) {
+      bh.consume(reader.readBytes());
+    }
+  }
+
+  // ---- FIXED_LEN_BYTE_ARRAY ----
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeFixedLenByteArray(Blackhole bh) throws IOException {
+    FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(FLBA_LENGTH);
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(flbaPage)));
+    for (int i = 0; i < VALUE_COUNT; i++) {
+      bh.consume(reader.readBytes());
+    }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeFixedLenByteArrayBatch(Blackhole bh) throws IOException {
+    FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(FLBA_LENGTH);
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(flbaPage)));
+    reader.readBinaries(flbaDest, 0, VALUE_COUNT);
+    bh.consume(flbaDest);
   }
 }

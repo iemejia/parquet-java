@@ -26,7 +26,6 @@ import org.apache.parquet.bytes.HeapByteBufferAllocator;
 import org.apache.parquet.column.Dictionary;
 import org.apache.parquet.column.Encoding;
 import org.apache.parquet.column.page.DictionaryPage;
-import org.apache.parquet.column.values.ValuesReader;
 import org.apache.parquet.column.values.ValuesWriter;
 import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesReaderForFLBA;
 import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesWriter;
@@ -35,8 +34,6 @@ import org.apache.parquet.column.values.deltastrings.DeltaByteArrayWriter;
 import org.apache.parquet.column.values.dictionary.DictionaryValuesReader;
 import org.apache.parquet.column.values.dictionary.DictionaryValuesWriter;
 import org.apache.parquet.column.values.dictionary.PlainValuesDictionary;
-import org.apache.parquet.column.values.plain.FixedLenByteArrayPlainValuesReader;
-import org.apache.parquet.column.values.plain.FixedLenByteArrayPlainValuesWriter;
 import org.apache.parquet.io.api.Binary;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -55,7 +52,9 @@ import org.openjdk.jmh.infra.Blackhole;
 
 /**
  * Encoding-level micro-benchmarks for FIXED_LEN_BYTE_ARRAY (FLBA) values across
- * all supported encodings: PLAIN, DELTA_BYTE_ARRAY, BYTE_STREAM_SPLIT, and DICTIONARY.
+ * the non-PLAIN supported encodings: DELTA_BYTE_ARRAY, BYTE_STREAM_SPLIT, and
+ * DICTIONARY. PLAIN encoding benchmarks live in {@link PlainEncodingBenchmark}
+ * and {@link PlainDecodingBenchmark}.
  *
  * <p>Each benchmark invocation processes {@value #VALUE_COUNT} values; throughput is
  * reported per-value via {@link OperationsPerInvocation}.
@@ -95,7 +94,6 @@ public class FixedLenByteArrayEncodingBenchmark {
   private Binary[] data;
 
   // Pre-encoded pages for decode benchmarks
-  private byte[] plainEncoded;
   private byte[] deltaEncoded;
   private byte[] bssEncoded;
   private byte[] dictDataEncoded;
@@ -111,7 +109,6 @@ public class FixedLenByteArrayEncodingBenchmark {
         VALUE_COUNT, fixedLength, distinct, TestDataFactory.DEFAULT_SEED);
 
     // Pre-encode for decode benchmarks
-    plainEncoded = encodeWith(newPlainWriter());
     deltaEncoded = encodeWith(newDeltaWriter());
     bssEncoded = encodeWith(newBssWriter());
     setupDict();
@@ -144,11 +141,6 @@ public class FixedLenByteArrayEncodingBenchmark {
 
   // ---- Writer factories ----
 
-  private FixedLenByteArrayPlainValuesWriter newPlainWriter() {
-    return new FixedLenByteArrayPlainValuesWriter(
-        fixedLength, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
-  }
-
   private DeltaByteArrayWriter newDeltaWriter() {
     return new DeltaByteArrayWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
   }
@@ -159,22 +151,6 @@ public class FixedLenByteArrayEncodingBenchmark {
   }
 
   // ==== ENCODE BENCHMARKS ====
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public byte[] encodePlain() throws IOException {
-    return encodeWith(newPlainWriter());
-  }
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public byte[] encodePlainBatch() throws IOException {
-    FixedLenByteArrayPlainValuesWriter writer = newPlainWriter();
-    writer.writeBinaries(data, 0, data.length);
-    byte[] bytes = writer.getBytes().toByteArray();
-    writer.close();
-    return bytes;
-  }
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
@@ -204,26 +180,6 @@ public class FixedLenByteArrayEncodingBenchmark {
   }
 
   // ==== DECODE BENCHMARKS ====
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void decodePlain(Blackhole bh) throws IOException {
-    FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(fixedLength);
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(plainEncoded)));
-    for (int i = 0; i < VALUE_COUNT; i++) {
-      bh.consume(reader.readBytes());
-    }
-  }
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void decodePlainBatch(Blackhole bh) throws IOException {
-    FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(fixedLength);
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(plainEncoded)));
-    Binary[] batch = new Binary[VALUE_COUNT];
-    reader.readBinaries(batch, 0, VALUE_COUNT);
-    bh.consume(batch);
-  }
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
