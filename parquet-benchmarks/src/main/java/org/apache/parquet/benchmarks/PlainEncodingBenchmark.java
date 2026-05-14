@@ -35,6 +35,7 @@ import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OperationsPerInvocation;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
@@ -49,10 +50,19 @@ import org.openjdk.jmh.annotations.Warmup;
  * available. Batch writes use bulk {@code ByteBuffer} view transfers in
  * {@code CapacityByteArrayOutputStream}.
  *
- * <p>BOOLEAN uses {@link BooleanPlainValuesWriter} which delegates to bit-packing.
- * BINARY uses {@link PlainValuesWriter} (length-prefixed bytes).
- * FIXED_LEN_BYTE_ARRAY uses {@link FixedLenByteArrayPlainValuesWriter} with a
- * representative fixed length of 16 (UUID-sized values).
+ * <p>Fixed-width types (BOOLEAN through DOUBLE) are data-independent for PLAIN
+ * encoding -- the cost per value is constant regardless of the value content or
+ * distribution pattern -- so no {@code @Param} is needed.
+ *
+ * <p>Variable/fixed-length byte types use inner {@link State} classes with
+ * {@code @Param} for the dimension that genuinely affects PLAIN throughput:
+ * <ul>
+ *   <li><b>BINARY:</b> parameterized by {@link BinaryState#stringLength} (10, 100,
+ *       1000) because PLAIN writes a 4-byte length prefix + N content bytes.</li>
+ *   <li><b>FIXED_LEN_BYTE_ARRAY:</b> parameterized by {@link FlbaState#fixedLength}
+ *       (2, 12, 16) because PLAIN writes exactly N bytes per value, covering
+ *       FLOAT16, INT96/legacy-timestamp, and UUID sizes.</li>
+ * </ul>
  */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -66,19 +76,13 @@ public class PlainEncodingBenchmark {
   private static final int INIT_SLAB_SIZE = 64 * 1024;
   private static final int PAGE_SIZE = 4 * 1024 * 1024;
 
-  /** Representative string length for BINARY benchmarks. */
-  private static final int BINARY_STRING_LENGTH = 100;
-
-  /** Representative fixed length for FLBA benchmarks (UUID-sized). */
-  private static final int FLBA_LENGTH = 16;
+  // ---- Fixed-width data (no @Param needed -- PLAIN cost is constant per value) ----
 
   private boolean[] boolData;
   private int[] intData;
   private long[] longData;
   private float[] floatData;
   private double[] doubleData;
-  private Binary[] binaryData;
-  private Binary[] flbaData;
 
   @Setup(Level.Trial)
   public void setup() {
@@ -95,9 +99,52 @@ public class PlainEncodingBenchmark {
       floatData[i] = r.nextFloat();
       doubleData[i] = r.nextDouble();
     }
-    binaryData = TestDataFactory.generateBinaryData(VALUE_COUNT, BINARY_STRING_LENGTH, 0, TestDataFactory.DEFAULT_SEED);
-    flbaData = TestDataFactory.generateFixedLenByteArrays(VALUE_COUNT, FLBA_LENGTH, 0, TestDataFactory.DEFAULT_SEED);
   }
+
+  // ---- BINARY state: parameterized by string length ----
+
+  /**
+   * Separate state for BINARY benchmarks so the {@code stringLength} parameter only
+   * creates trials for binary-related benchmark methods, not for fixed-width types.
+   */
+  @State(Scope.Thread)
+  public static class BinaryState {
+    /** Short (10), medium (100), and long (1000) strings. */
+    @Param({"10", "100", "1000"})
+    public int stringLength;
+
+    Binary[] data;
+
+    @Setup(Level.Trial)
+    public void setup() {
+      data = TestDataFactory.generateBinaryData(
+          VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
+    }
+  }
+
+  // ---- FLBA state: parameterized by fixed byte length ----
+
+  /**
+   * Separate state for FIXED_LEN_BYTE_ARRAY benchmarks so the {@code fixedLength}
+   * parameter only creates trials for FLBA-related benchmark methods.
+   * Values: 2 = FLOAT16, 12 = INT96, 16 = UUID.
+   */
+  @State(Scope.Thread)
+  public static class FlbaState {
+    /** FLOAT16 (2), INT96 (12), UUID (16). */
+    @Param({"2", "12", "16"})
+    public int fixedLength;
+
+    Binary[] data;
+
+    @Setup(Level.Trial)
+    public void setup() {
+      data = TestDataFactory.generateFixedLenByteArrays(
+          VALUE_COUNT, fixedLength, 0, TestDataFactory.DEFAULT_SEED);
+    }
+  }
+
+  // ---- Writer factories ----
 
   private static PlainValuesWriter newWriter() {
     return new PlainValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
@@ -107,9 +154,9 @@ public class PlainEncodingBenchmark {
     return new BooleanPlainValuesWriter();
   }
 
-  private FixedLenByteArrayPlainValuesWriter newFlbaWriter() {
+  private static FixedLenByteArrayPlainValuesWriter newFlbaWriter(int fixedLength) {
     return new FixedLenByteArrayPlainValuesWriter(
-        FLBA_LENGTH, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+        fixedLength, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
   }
 
   // ---- BOOLEAN ----
@@ -232,13 +279,13 @@ public class PlainEncodingBenchmark {
     return bytes;
   }
 
-  // ---- BINARY ----
+  // ---- BINARY (parameterized by string length) ----
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public byte[] encodeBinary() throws IOException {
+  public byte[] encodeBinary(BinaryState state) throws IOException {
     PlainValuesWriter w = newWriter();
-    for (Binary v : binaryData) {
+    for (Binary v : state.data) {
       w.writeBytes(v);
     }
     byte[] bytes = w.getBytes().toByteArray();
@@ -246,13 +293,13 @@ public class PlainEncodingBenchmark {
     return bytes;
   }
 
-  // ---- FIXED_LEN_BYTE_ARRAY ----
+  // ---- FIXED_LEN_BYTE_ARRAY (parameterized by fixed length) ----
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public byte[] encodeFixedLenByteArray() throws IOException {
-    FixedLenByteArrayPlainValuesWriter w = newFlbaWriter();
-    for (Binary v : flbaData) {
+  public byte[] encodeFixedLenByteArray(FlbaState state) throws IOException {
+    FixedLenByteArrayPlainValuesWriter w = newFlbaWriter(state.fixedLength);
+    for (Binary v : state.data) {
       w.writeBytes(v);
     }
     byte[] bytes = w.getBytes().toByteArray();
@@ -262,9 +309,9 @@ public class PlainEncodingBenchmark {
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public byte[] encodeFixedLenByteArrayBatch() throws IOException {
-    FixedLenByteArrayPlainValuesWriter w = newFlbaWriter();
-    w.writeBinaries(flbaData, 0, flbaData.length);
+  public byte[] encodeFixedLenByteArrayBatch(FlbaState state) throws IOException {
+    FixedLenByteArrayPlainValuesWriter w = newFlbaWriter(state.fixedLength);
+    w.writeBinaries(state.data, 0, state.data.length);
     byte[] bytes = w.getBytes().toByteArray();
     w.close();
     return bytes;

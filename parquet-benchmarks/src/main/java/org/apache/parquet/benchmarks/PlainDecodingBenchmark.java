@@ -42,6 +42,7 @@ import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OperationsPerInvocation;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
@@ -57,10 +58,20 @@ import org.openjdk.jmh.infra.Blackhole;
  * scalar read throughput; batch methods measure bulk array-fill throughput using
  * bulk {@code ByteBuffer} view reads where available.
  *
- * <p>BOOLEAN uses {@link BooleanPlainValuesReader} (bit-unpacking).
- * BINARY uses {@link BinaryPlainValuesReader} (length-prefixed bytes).
- * FIXED_LEN_BYTE_ARRAY uses {@link FixedLenByteArrayPlainValuesReader} with a
- * representative fixed length of 16 (UUID-sized values).
+ * <p>Fixed-width types (BOOLEAN through DOUBLE) are data-independent for PLAIN
+ * decoding -- the cost per value is constant regardless of the value content or
+ * distribution pattern -- so no {@code @Param} is needed.
+ *
+ * <p>Variable/fixed-length byte types use inner {@link State} classes with
+ * {@code @Param} for the dimension that genuinely affects PLAIN throughput:
+ * <ul>
+ *   <li><b>BINARY:</b> parameterized by {@link BinaryState#stringLength} (10, 100,
+ *       1000) because PLAIN reads a 4-byte length prefix then slices N content
+ *       bytes.</li>
+ *   <li><b>FIXED_LEN_BYTE_ARRAY:</b> parameterized by {@link FlbaState#fixedLength}
+ *       (2, 12, 16) because PLAIN slices exactly N bytes per value, covering
+ *       FLOAT16, INT96/legacy-timestamp, and UUID sizes.</li>
+ * </ul>
  */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -74,20 +85,13 @@ public class PlainDecodingBenchmark {
   private static final int INIT_SLAB_SIZE = 64 * 1024;
   private static final int PAGE_SIZE = 4 * 1024 * 1024;
 
-  /** Representative string length for BINARY benchmarks. */
-  private static final int BINARY_STRING_LENGTH = 100;
+  // ---- Pre-encoded pages for fixed-width types ----
 
-  /** Representative fixed length for FLBA benchmarks (UUID-sized). */
-  private static final int FLBA_LENGTH = 16;
-
-  // Pre-encoded pages
   private byte[] boolPage;
   private byte[] intPage;
   private byte[] longPage;
   private byte[] floatPage;
   private byte[] doublePage;
-  private byte[] binaryPage;
-  private byte[] flbaPage;
 
   // Pre-allocated destination arrays to avoid per-invocation allocation noise
   private boolean[] boolDest;
@@ -95,7 +99,6 @@ public class PlainDecodingBenchmark {
   private long[] longDest;
   private float[] floatDest;
   private double[] doubleDest;
-  private Binary[] flbaDest;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
@@ -107,7 +110,6 @@ public class PlainDecodingBenchmark {
     longDest = new long[VALUE_COUNT];
     floatDest = new float[VALUE_COUNT];
     doubleDest = new double[VALUE_COUNT];
-    flbaDest = new Binary[VALUE_COUNT];
 
     // Encode BOOLEAN
     {
@@ -158,30 +160,65 @@ public class PlainDecodingBenchmark {
       doublePage = w.getBytes().toByteArray();
       w.close();
     }
+  }
 
-    // Encode BINARY
-    {
+  // ---- BINARY state: parameterized by string length ----
+
+  /**
+   * Separate state for BINARY decode benchmarks. Pre-encodes a page of binary values
+   * so the {@code stringLength} parameter only creates trials for binary-related
+   * benchmark methods.
+   */
+  @State(Scope.Thread)
+  public static class BinaryState {
+    /** Short (10), medium (100), and long (1000) strings. */
+    @Param({"10", "100", "1000"})
+    public int stringLength;
+
+    byte[] page;
+
+    @Setup(Level.Trial)
+    public void setup() throws IOException {
       Binary[] data = TestDataFactory.generateBinaryData(
-          VALUE_COUNT, BINARY_STRING_LENGTH, 0, TestDataFactory.DEFAULT_SEED);
+          VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
       PlainValuesWriter w = new PlainValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
       for (Binary v : data) {
         w.writeBytes(v);
       }
-      binaryPage = w.getBytes().toByteArray();
+      page = w.getBytes().toByteArray();
       w.close();
     }
+  }
 
-    // Encode FIXED_LEN_BYTE_ARRAY
-    {
+  // ---- FLBA state: parameterized by fixed byte length ----
+
+  /**
+   * Separate state for FIXED_LEN_BYTE_ARRAY decode benchmarks. Pre-encodes a page of
+   * FLBA values so the {@code fixedLength} parameter only creates trials for
+   * FLBA-related benchmark methods. Values: 2 = FLOAT16, 12 = INT96, 16 = UUID.
+   */
+  @State(Scope.Thread)
+  public static class FlbaState {
+    /** FLOAT16 (2), INT96 (12), UUID (16). */
+    @Param({"2", "12", "16"})
+    public int fixedLength;
+
+    byte[] page;
+    Binary[] dest;
+
+    @Setup(Level.Trial)
+    public void setup() throws IOException {
       Binary[] data = TestDataFactory.generateFixedLenByteArrays(
-          VALUE_COUNT, FLBA_LENGTH, 0, TestDataFactory.DEFAULT_SEED);
+          VALUE_COUNT, fixedLength, 0, TestDataFactory.DEFAULT_SEED);
       FixedLenByteArrayPlainValuesWriter w = new FixedLenByteArrayPlainValuesWriter(
-          FLBA_LENGTH, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+          fixedLength, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
       for (Binary v : data) {
         w.writeBytes(v);
       }
-      flbaPage = w.getBytes().toByteArray();
+      page = w.getBytes().toByteArray();
       w.close();
+
+      dest = new Binary[VALUE_COUNT];
     }
   }
 
@@ -290,25 +327,25 @@ public class PlainDecodingBenchmark {
     return doubleDest;
   }
 
-  // ---- BINARY ----
+  // ---- BINARY (parameterized by string length) ----
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public void decodeBinary(Blackhole bh) throws IOException {
+  public void decodeBinary(BinaryState state, Blackhole bh) throws IOException {
     BinaryPlainValuesReader reader = new BinaryPlainValuesReader();
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(binaryPage)));
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(state.page)));
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(reader.readBytes());
     }
   }
 
-  // ---- FIXED_LEN_BYTE_ARRAY ----
+  // ---- FIXED_LEN_BYTE_ARRAY (parameterized by fixed length) ----
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public void decodeFixedLenByteArray(Blackhole bh) throws IOException {
-    FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(FLBA_LENGTH);
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(flbaPage)));
+  public void decodeFixedLenByteArray(FlbaState state, Blackhole bh) throws IOException {
+    FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(state.fixedLength);
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(state.page)));
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(reader.readBytes());
     }
@@ -316,10 +353,10 @@ public class PlainDecodingBenchmark {
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public void decodeFixedLenByteArrayBatch(Blackhole bh) throws IOException {
-    FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(FLBA_LENGTH);
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(flbaPage)));
-    reader.readBinaries(flbaDest, 0, VALUE_COUNT);
-    bh.consume(flbaDest);
+  public void decodeFixedLenByteArrayBatch(FlbaState state, Blackhole bh) throws IOException {
+    FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(state.fixedLength);
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(state.page)));
+    reader.readBinaries(state.dest, 0, VALUE_COUNT);
+    bh.consume(state.dest);
   }
 }
