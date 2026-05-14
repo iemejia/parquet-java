@@ -27,8 +27,6 @@ import org.apache.parquet.column.Dictionary;
 import org.apache.parquet.column.Encoding;
 import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.values.ValuesWriter;
-import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesReaderForFLBA;
-import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesWriter;
 import org.apache.parquet.column.values.deltastrings.DeltaByteArrayReader;
 import org.apache.parquet.column.values.deltastrings.DeltaByteArrayWriter;
 import org.apache.parquet.column.values.dictionary.DictionaryValuesReader;
@@ -52,9 +50,11 @@ import org.openjdk.jmh.infra.Blackhole;
 
 /**
  * Encoding-level micro-benchmarks for FIXED_LEN_BYTE_ARRAY (FLBA) values across
- * the non-PLAIN supported encodings: DELTA_BYTE_ARRAY, BYTE_STREAM_SPLIT, and
- * DICTIONARY. PLAIN encoding benchmarks live in {@link PlainEncodingBenchmark}
- * and {@link PlainDecodingBenchmark}.
+ * the non-PLAIN supported encodings: DELTA_BYTE_ARRAY and DICTIONARY.
+ * PLAIN encoding benchmarks live in {@link PlainEncodingBenchmark} and
+ * {@link PlainDecodingBenchmark}. BYTE_STREAM_SPLIT benchmarks live in
+ * {@link ByteStreamSplitEncodingBenchmark} and
+ * {@link ByteStreamSplitDecodingBenchmark}.
  *
  * <p>Each benchmark invocation processes {@value #VALUE_COUNT} values; throughput is
  * reported per-value via {@link OperationsPerInvocation}.
@@ -95,7 +95,6 @@ public class FixedLenByteArrayEncodingBenchmark {
 
   // Pre-encoded pages for decode benchmarks
   private byte[] deltaEncoded;
-  private byte[] bssEncoded;
   private byte[] dictDataEncoded;
   private Dictionary flbaDictionary;
   private boolean dictAvailable;
@@ -110,7 +109,6 @@ public class FixedLenByteArrayEncodingBenchmark {
 
     // Pre-encode for decode benchmarks
     deltaEncoded = encodeWith(newDeltaWriter());
-    bssEncoded = encodeWith(newBssWriter());
     setupDict();
   }
 
@@ -145,23 +143,12 @@ public class FixedLenByteArrayEncodingBenchmark {
     return new DeltaByteArrayWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
   }
 
-  private ByteStreamSplitValuesWriter.FixedLenByteArrayByteStreamSplitValuesWriter newBssWriter() {
-    return new ByteStreamSplitValuesWriter.FixedLenByteArrayByteStreamSplitValuesWriter(
-        fixedLength, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
-  }
-
   // ==== ENCODE BENCHMARKS ====
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
   public byte[] encodeDelta() throws IOException {
     return encodeWith(newDeltaWriter());
-  }
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public byte[] encodeBss() throws IOException {
-    return encodeWith(newBssWriter());
   }
 
   @Benchmark
@@ -189,26 +176,6 @@ public class FixedLenByteArrayEncodingBenchmark {
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(reader.readBytes());
     }
-  }
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void decodeBss(Blackhole bh) throws IOException {
-    ByteStreamSplitValuesReaderForFLBA reader = new ByteStreamSplitValuesReaderForFLBA(fixedLength);
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(bssEncoded)));
-    for (int i = 0; i < VALUE_COUNT; i++) {
-      bh.consume(reader.readBytes());
-    }
-  }
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void decodeBssBatch(Blackhole bh) throws IOException {
-    ByteStreamSplitValuesReaderForFLBA reader = new ByteStreamSplitValuesReaderForFLBA(fixedLength);
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(bssEncoded)));
-    Binary[] batch = new Binary[VALUE_COUNT];
-    reader.readBinaries(batch, 0, VALUE_COUNT);
-    bh.consume(batch);
   }
 
   @Benchmark

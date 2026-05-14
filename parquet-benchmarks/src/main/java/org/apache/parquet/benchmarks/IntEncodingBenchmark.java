@@ -27,8 +27,6 @@ import org.apache.parquet.column.Dictionary;
 import org.apache.parquet.column.Encoding;
 import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.values.ValuesWriter;
-import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesReaderForInteger;
-import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesWriter;
 import org.apache.parquet.column.values.delta.DeltaBinaryPackingValuesReader;
 import org.apache.parquet.column.values.delta.DeltaBinaryPackingValuesWriterForInteger;
 import org.apache.parquet.column.values.dictionary.DictionaryValuesReader;
@@ -51,19 +49,17 @@ import org.openjdk.jmh.infra.Blackhole;
 
 /**
  * Encoding-level and decoding-level micro-benchmarks for INT32 values.
- * Compares DELTA_BINARY_PACKED, BYTE_STREAM_SPLIT, and DICTIONARY encodings
- * across different data distribution patterns. PLAIN encoding benchmarks live
- * in {@link PlainEncodingBenchmark} and {@link PlainDecodingBenchmark}.
+ * Compares DELTA_BINARY_PACKED and DICTIONARY encodings across different data
+ * distribution patterns. PLAIN encoding benchmarks live in
+ * {@link PlainEncodingBenchmark} and {@link PlainDecodingBenchmark}.
+ * BYTE_STREAM_SPLIT benchmarks live in {@link ByteStreamSplitEncodingBenchmark}
+ * and {@link ByteStreamSplitDecodingBenchmark}.
  * Synthetic dictionary-id RLE decode is benchmarked separately in
  * {@link RleDictionaryIndexDecodingBenchmark} so the results here stay
  * comparable at the full-value level.
  *
  * <p>Each benchmark invocation processes {@value #VALUE_COUNT} values. Throughput is
  * reported per-value using {@link OperationsPerInvocation}.
- *
- * <p>BYTE_STREAM_SPLIT is included for completeness even though it is rarely a good
- * choice for integer data; it exists here to compare the full set of encodings the
- * Parquet writer can emit for INT32.
  *
  * <p>The dictionary encode/decode benchmarks measure the full path: the encoder
  * produces both the RLE-encoded indices and a {@link DictionaryPage}; the decoder
@@ -88,7 +84,6 @@ public class IntEncodingBenchmark {
 
   private int[] data;
   private byte[] deltaEncoded;
-  private byte[] bssEncoded;
   private byte[] dictDataEncoded;
   private DictionaryPage dictPage;
   private Dictionary intDictionary;
@@ -116,7 +111,6 @@ public class IntEncodingBenchmark {
 
     // Pre-encode data for decode benchmarks
     deltaEncoded = encodeWith(newDeltaWriter());
-    bssEncoded = encodeWith(newBssWriter());
 
     // Pre-encode dictionary data for decode benchmark
     DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter dictWriter = newDictWriter();
@@ -155,11 +149,6 @@ public class IntEncodingBenchmark {
     return new DeltaBinaryPackingValuesWriterForInteger(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
   }
 
-  private static ByteStreamSplitValuesWriter.IntegerByteStreamSplitValuesWriter newBssWriter() {
-    return new ByteStreamSplitValuesWriter.IntegerByteStreamSplitValuesWriter(
-        INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
-  }
-
   private static DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter newDictWriter() {
     return new DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter(
         MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
@@ -171,12 +160,6 @@ public class IntEncodingBenchmark {
   @OperationsPerInvocation(VALUE_COUNT)
   public byte[] encodeDelta() throws IOException {
     return encodeWith(newDeltaWriter());
-  }
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public byte[] encodeByteStreamSplit() throws IOException {
-    return encodeWith(newBssWriter());
   }
 
   @Benchmark
@@ -194,16 +177,6 @@ public class IntEncodingBenchmark {
   public void decodeDelta(Blackhole bh) throws IOException {
     DeltaBinaryPackingValuesReader reader = new DeltaBinaryPackingValuesReader();
     reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(deltaEncoded)));
-    for (int i = 0; i < VALUE_COUNT; i++) {
-      bh.consume(reader.readInteger());
-    }
-  }
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void decodeByteStreamSplit(Blackhole bh) throws IOException {
-    ByteStreamSplitValuesReaderForInteger reader = new ByteStreamSplitValuesReaderForInteger();
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(bssEncoded)));
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(reader.readInteger());
     }
