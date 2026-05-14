@@ -71,7 +71,7 @@ import org.openjdk.jmh.infra.Blackhole;
 @State(Scope.Benchmark)
 public class FileReadBenchmark {
 
-  @Param({"UNCOMPRESSED", "SNAPPY", "ZSTD", "GZIP", "LZ4_RAW"})
+  @Param({"UNCOMPRESSED", "SNAPPY", "ZSTD", "GZIP", "LZ4_RAW", "BROTLI"})
   public String codec;
 
   @Param({"PARQUET_1_0", "PARQUET_2_0"})
