@@ -502,7 +502,7 @@ class DirectCodecFactory extends CodecFactory implements AutoCloseable {
   }
 
   /**
-  /**
+   * /**
    * Direct-memory LZ4_RAW decompressor using airlift's LZ4 decompressor with
    * direct ByteBuffers, avoiding reflection-based {@link FullDirectDecompressor}.
    */

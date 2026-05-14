@@ -71,11 +71,9 @@ public class DeltaLengthByteArrayDecodingBenchmark {
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
-    Binary[] data = TestDataFactory.generateBinaryData(
-        VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
+    Binary[] data = TestDataFactory.generateBinaryData(VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
 
-    ValuesWriter w = new DeltaLengthByteArrayValuesWriter(
-        INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    ValuesWriter w = new DeltaLengthByteArrayValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
     for (Binary v : data) {
       w.writeBytes(v);
     }

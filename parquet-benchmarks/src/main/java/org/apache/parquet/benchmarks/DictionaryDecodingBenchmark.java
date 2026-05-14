@@ -145,7 +145,10 @@ public class DictionaryDecodingBenchmark {
     private void setupIntDict(int[] data) throws IOException {
       DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter w =
           new DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter(
-              MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+              MAX_DICT_BYTE_SIZE,
+              Encoding.PLAIN_DICTIONARY,
+              Encoding.PLAIN,
+              new HeapByteBufferAllocator());
       for (int v : data) {
         w.writeInteger(v);
       }
@@ -160,7 +163,10 @@ public class DictionaryDecodingBenchmark {
     private void setupLongDict(long[] data) throws IOException {
       DictionaryValuesWriter.PlainLongDictionaryValuesWriter w =
           new DictionaryValuesWriter.PlainLongDictionaryValuesWriter(
-              MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+              MAX_DICT_BYTE_SIZE,
+              Encoding.PLAIN_DICTIONARY,
+              Encoding.PLAIN,
+              new HeapByteBufferAllocator());
       for (long v : data) {
         w.writeLong(v);
       }
@@ -175,7 +181,10 @@ public class DictionaryDecodingBenchmark {
     private void setupFloatDict(float[] data) throws IOException {
       DictionaryValuesWriter.PlainFloatDictionaryValuesWriter w =
           new DictionaryValuesWriter.PlainFloatDictionaryValuesWriter(
-              MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+              MAX_DICT_BYTE_SIZE,
+              Encoding.PLAIN_DICTIONARY,
+              Encoding.PLAIN,
+              new HeapByteBufferAllocator());
       for (float v : data) {
         w.writeFloat(v);
       }
@@ -190,7 +199,10 @@ public class DictionaryDecodingBenchmark {
     private void setupDoubleDict(double[] data) throws IOException {
       DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter w =
           new DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter(
-              MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+              MAX_DICT_BYTE_SIZE,
+              Encoding.PLAIN_DICTIONARY,
+              Encoding.PLAIN,
+              new HeapByteBufferAllocator());
       for (double v : data) {
         w.writeDouble(v);
       }
@@ -313,7 +325,9 @@ public class DictionaryDecodingBenchmark {
 
       DictionaryValuesWriter.PlainBinaryDictionaryValuesWriter w =
           new DictionaryValuesWriter.PlainBinaryDictionaryValuesWriter(
-              MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN,
+              MAX_DICT_BYTE_SIZE,
+              Encoding.PLAIN_DICTIONARY,
+              Encoding.PLAIN,
               new HeapByteBufferAllocator());
       for (Binary v : data) {
         w.writeBytes(v);
@@ -360,7 +374,10 @@ public class DictionaryDecodingBenchmark {
 
       DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter w =
           new DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter(
-              MAX_DICT_BYTE_SIZE, fixedLength, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN,
+              MAX_DICT_BYTE_SIZE,
+              fixedLength,
+              Encoding.PLAIN_DICTIONARY,
+              Encoding.PLAIN,
               new HeapByteBufferAllocator());
       for (Binary v : data) {
         w.writeBytes(v);

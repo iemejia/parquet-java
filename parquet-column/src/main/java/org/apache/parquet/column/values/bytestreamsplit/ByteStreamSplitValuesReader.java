@@ -90,7 +90,9 @@ public abstract class ByteStreamSplitValuesReader extends ValuesReader {
         decoded[di + 1] = src[s1 + i];
       }
     } else if (elementSizeInBytes == 4) {
-      int s0 = srcBase, s1 = srcBase + valuesCount, s2 = srcBase + 2 * valuesCount,
+      int s0 = srcBase,
+          s1 = srcBase + valuesCount,
+          s2 = srcBase + 2 * valuesCount,
           s3 = srcBase + 3 * valuesCount;
       for (int i = 0; i < valuesCount; ++i) {
         int di = i * 4;
@@ -100,9 +102,13 @@ public abstract class ByteStreamSplitValuesReader extends ValuesReader {
         decoded[di + 3] = src[s3 + i];
       }
     } else if (elementSizeInBytes == 8) {
-      int s0 = srcBase, s1 = srcBase + valuesCount, s2 = srcBase + 2 * valuesCount,
-          s3 = srcBase + 3 * valuesCount, s4 = srcBase + 4 * valuesCount,
-          s5 = srcBase + 5 * valuesCount, s6 = srcBase + 6 * valuesCount,
+      int s0 = srcBase,
+          s1 = srcBase + valuesCount,
+          s2 = srcBase + 2 * valuesCount,
+          s3 = srcBase + 3 * valuesCount,
+          s4 = srcBase + 4 * valuesCount,
+          s5 = srcBase + 5 * valuesCount,
+          s6 = srcBase + 6 * valuesCount,
           s7 = srcBase + 7 * valuesCount;
       for (int i = 0; i < valuesCount; ++i) {
         int di = i * 8;
@@ -116,11 +122,17 @@ public abstract class ByteStreamSplitValuesReader extends ValuesReader {
         decoded[di + 7] = src[s7 + i];
       }
     } else if (elementSizeInBytes == 12) {
-      int s0 = srcBase, s1 = srcBase + valuesCount, s2 = srcBase + 2 * valuesCount,
-          s3 = srcBase + 3 * valuesCount, s4 = srcBase + 4 * valuesCount,
-          s5 = srcBase + 5 * valuesCount, s6 = srcBase + 6 * valuesCount,
-          s7 = srcBase + 7 * valuesCount, s8 = srcBase + 8 * valuesCount,
-          s9 = srcBase + 9 * valuesCount, s10 = srcBase + 10 * valuesCount,
+      int s0 = srcBase,
+          s1 = srcBase + valuesCount,
+          s2 = srcBase + 2 * valuesCount,
+          s3 = srcBase + 3 * valuesCount,
+          s4 = srcBase + 4 * valuesCount,
+          s5 = srcBase + 5 * valuesCount,
+          s6 = srcBase + 6 * valuesCount,
+          s7 = srcBase + 7 * valuesCount,
+          s8 = srcBase + 8 * valuesCount,
+          s9 = srcBase + 9 * valuesCount,
+          s10 = srcBase + 10 * valuesCount,
           s11 = srcBase + 11 * valuesCount;
       for (int i = 0; i < valuesCount; ++i) {
         int di = i * 12;
@@ -138,13 +150,21 @@ public abstract class ByteStreamSplitValuesReader extends ValuesReader {
         decoded[di + 11] = src[s11 + i];
       }
     } else if (elementSizeInBytes == 16) {
-      int s0 = srcBase, s1 = srcBase + valuesCount, s2 = srcBase + 2 * valuesCount,
-          s3 = srcBase + 3 * valuesCount, s4 = srcBase + 4 * valuesCount,
-          s5 = srcBase + 5 * valuesCount, s6 = srcBase + 6 * valuesCount,
-          s7 = srcBase + 7 * valuesCount, s8 = srcBase + 8 * valuesCount,
-          s9 = srcBase + 9 * valuesCount, s10 = srcBase + 10 * valuesCount,
-          s11 = srcBase + 11 * valuesCount, s12 = srcBase + 12 * valuesCount,
-          s13 = srcBase + 13 * valuesCount, s14 = srcBase + 14 * valuesCount,
+      int s0 = srcBase,
+          s1 = srcBase + valuesCount,
+          s2 = srcBase + 2 * valuesCount,
+          s3 = srcBase + 3 * valuesCount,
+          s4 = srcBase + 4 * valuesCount,
+          s5 = srcBase + 5 * valuesCount,
+          s6 = srcBase + 6 * valuesCount,
+          s7 = srcBase + 7 * valuesCount,
+          s8 = srcBase + 8 * valuesCount,
+          s9 = srcBase + 9 * valuesCount,
+          s10 = srcBase + 10 * valuesCount,
+          s11 = srcBase + 11 * valuesCount,
+          s12 = srcBase + 12 * valuesCount,
+          s13 = srcBase + 13 * valuesCount,
+          s14 = srcBase + 14 * valuesCount,
           s15 = srcBase + 15 * valuesCount;
       for (int i = 0; i < valuesCount; ++i) {
         int di = i * 16;

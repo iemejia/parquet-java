@@ -113,8 +113,8 @@ public class DeltaBinaryPackedDecodingBenchmark {
       w.close();
     }
     {
-      ValuesWriter w = new DeltaBinaryPackingValuesWriterForLong(
-          INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+      ValuesWriter w =
+          new DeltaBinaryPackingValuesWriterForLong(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
       for (long v : longData) {
         w.writeLong(v);
       }

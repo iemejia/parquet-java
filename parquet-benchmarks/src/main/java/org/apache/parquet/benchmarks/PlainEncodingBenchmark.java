@@ -117,8 +117,7 @@ public class PlainEncodingBenchmark {
 
     @Setup(Level.Trial)
     public void setup() {
-      data = TestDataFactory.generateBinaryData(
-          VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
+      data = TestDataFactory.generateBinaryData(VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
     }
   }
 

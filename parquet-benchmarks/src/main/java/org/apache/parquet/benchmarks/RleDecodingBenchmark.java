@@ -82,8 +82,8 @@ public class RleDecodingBenchmark {
   public void setup() throws IOException {
     boolean[] data = RleEncodingBenchmark.generateData(dataPattern);
 
-    ValuesWriter w = new RunLengthBitPackingHybridValuesWriter(
-        1, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    ValuesWriter w =
+        new RunLengthBitPackingHybridValuesWriter(1, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
     for (boolean v : data) {
       w.writeBoolean(v);
     }

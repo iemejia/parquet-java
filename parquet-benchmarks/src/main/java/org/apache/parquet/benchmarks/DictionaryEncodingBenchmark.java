@@ -221,7 +221,10 @@ public class DictionaryEncodingBenchmark {
   public void encodeFlba(FlbaState state, Blackhole bh) throws IOException {
     DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter w =
         new DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter(
-            MAX_DICT_BYTE_SIZE, state.fixedLength, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN,
+            MAX_DICT_BYTE_SIZE,
+            state.fixedLength,
+            Encoding.PLAIN_DICTIONARY,
+            Encoding.PLAIN,
             new HeapByteBufferAllocator());
     for (Binary v : state.data) {
       w.writeBytes(v);

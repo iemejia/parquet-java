@@ -109,8 +109,8 @@ public class RleEncodingBenchmark {
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
   public byte[] encodeBoolean() throws IOException {
-    ValuesWriter w = new RunLengthBitPackingHybridValuesWriter(
-        1, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    ValuesWriter w =
+        new RunLengthBitPackingHybridValuesWriter(1, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
     for (boolean v : data) {
       w.writeBoolean(v);
     }
@@ -122,8 +122,8 @@ public class RleEncodingBenchmark {
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
   public byte[] encodeBooleanBatch() throws IOException {
-    ValuesWriter w = new RunLengthBitPackingHybridValuesWriter(
-        1, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    ValuesWriter w =
+        new RunLengthBitPackingHybridValuesWriter(1, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
     w.writeBooleans(data, 0, data.length);
     byte[] bytes = w.getBytes().toByteArray();
     w.close();
