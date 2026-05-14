@@ -26,8 +26,6 @@ import org.apache.parquet.bytes.HeapByteBufferAllocator;
 import org.apache.parquet.column.values.ValuesWriter;
 import org.apache.parquet.column.values.deltalengthbytearray.DeltaLengthByteArrayValuesReader;
 import org.apache.parquet.column.values.deltalengthbytearray.DeltaLengthByteArrayValuesWriter;
-import org.apache.parquet.column.values.deltastrings.DeltaByteArrayReader;
-import org.apache.parquet.column.values.deltastrings.DeltaByteArrayWriter;
 import org.apache.parquet.io.api.Binary;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -45,16 +43,14 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Encoding and decoding micro-benchmarks for BINARY delta encodings:
- * DELTA_LENGTH_BYTE_ARRAY and DELTA_BYTE_ARRAY. Exercises both encodings across
- * different string lengths.
+ * Decoding micro-benchmarks for the DELTA_LENGTH_BYTE_ARRAY encoding.
+ * Encoding benchmarks live in {@link DeltaLengthByteArrayEncodingBenchmark}.
  *
- * <p>PLAIN encoding benchmarks live in {@link PlainEncodingBenchmark} and
- * {@link PlainDecodingBenchmark}. Dictionary benchmarks live in
- * {@link DictionaryEncodingBenchmark} and {@link DictionaryDecodingBenchmark}.
+ * <p>The {@code stringLength} parameter exercises the decoding across different
+ * value sizes.
  *
- * <p>Each benchmark invocation processes {@value #VALUE_COUNT} values. Throughput is
- * reported per-value using {@link OperationsPerInvocation}.
+ * <p>Each invocation decodes {@value #VALUE_COUNT} values; throughput is
+ * reported per-value via {@link OperationsPerInvocation}.
  */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -62,7 +58,7 @@ import org.openjdk.jmh.infra.Blackhole;
 @Warmup(iterations = 3, time = 1)
 @Measurement(iterations = 5, time = 1)
 @State(Scope.Thread)
-public class BinaryEncodingBenchmark {
+public class DeltaLengthByteArrayDecodingBenchmark {
 
   static final int VALUE_COUNT = 100_000;
   private static final int INIT_SLAB_SIZE = 64 * 1024;
@@ -71,69 +67,27 @@ public class BinaryEncodingBenchmark {
   @Param({"10", "100", "1000"})
   public int stringLength;
 
-  private Binary[] data;
-  private byte[] deltaLengthEncoded;
-  private byte[] deltaStringsEncoded;
+  private byte[] encoded;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
-    data = TestDataFactory.generateBinaryData(VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
+    Binary[] data = TestDataFactory.generateBinaryData(
+        VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
 
-    // Pre-encode data for decode benchmarks
-    deltaLengthEncoded = encodeBinaryWith(newDeltaLengthWriter());
-    deltaStringsEncoded = encodeBinaryWith(newDeltaStringsWriter());
-  }
-
-  private byte[] encodeBinaryWith(ValuesWriter writer) throws IOException {
+    ValuesWriter w = new DeltaLengthByteArrayValuesWriter(
+        INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
     for (Binary v : data) {
-      writer.writeBytes(v);
+      w.writeBytes(v);
     }
-    byte[] bytes = writer.getBytes().toByteArray();
-    writer.close();
-    return bytes;
-  }
-
-  // ---- Writer factories ----
-
-  private static DeltaLengthByteArrayValuesWriter newDeltaLengthWriter() {
-    return new DeltaLengthByteArrayValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
-  }
-
-  private static DeltaByteArrayWriter newDeltaStringsWriter() {
-    return new DeltaByteArrayWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
-  }
-
-  // ---- Encode benchmarks ----
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public byte[] encodeDeltaLengthByteArray() throws IOException {
-    return encodeBinaryWith(newDeltaLengthWriter());
+    encoded = w.getBytes().toByteArray();
+    w.close();
   }
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public byte[] encodeDeltaByteArray() throws IOException {
-    return encodeBinaryWith(newDeltaStringsWriter());
-  }
-
-  // ---- Decode benchmarks ----
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void decodeDeltaLengthByteArray(Blackhole bh) throws IOException {
+  public void decode(Blackhole bh) throws IOException {
     DeltaLengthByteArrayValuesReader reader = new DeltaLengthByteArrayValuesReader();
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(deltaLengthEncoded)));
-    for (int i = 0; i < VALUE_COUNT; i++) {
-      bh.consume(reader.readBytes());
-    }
-  }
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void decodeDeltaByteArray(Blackhole bh) throws IOException {
-    DeltaByteArrayReader reader = new DeltaByteArrayReader();
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(deltaStringsEncoded)));
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(encoded)));
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(reader.readBytes());
     }
