@@ -45,12 +45,17 @@ import org.openjdk.jmh.infra.Blackhole;
  * {@code DOUBLE}, {@code BINARY}, and {@code FIXED_LEN_BYTE_ARRAY}.
  * Decoding benchmarks live in {@link DictionaryDecodingBenchmark}.
  *
- * <p>Fixed-width numeric types ({@code INT32}, {@code INT64}, {@code FLOAT},
- * {@code DOUBLE}) are benchmarked by top-level methods controlled by a class-level
- * {@code dataPattern} parameter. Variable-length types ({@code BINARY} and
- * {@code FIXED_LEN_BYTE_ARRAY}) use inner {@link BinaryState} and {@link FlbaState}
- * classes with their own {@code @Param} dimensions to avoid JMH cross-product
- * pollution.
+ * <p>Each type group uses its own inner {@link State} class with independent
+ * {@code @Param} dimensions to avoid JMH cross-product pollution:
+ * <ul>
+ *   <li>{@link NumericState}: fixed-width numeric types ({@code INT32},
+ *       {@code INT64}, {@code FLOAT}, {@code DOUBLE}), parameterised by
+ *       {@code dataPattern}.</li>
+ *   <li>{@link BinaryState}: {@code BINARY}, parameterised by
+ *       {@code stringLength} and {@code cardinality}.</li>
+ *   <li>{@link FlbaState}: {@code FIXED_LEN_BYTE_ARRAY}, parameterised by
+ *       {@code fixedLength} and {@code cardinality}.</li>
+ * </ul>
  *
  * <p>Each type's encode benchmark measures the full dictionary-build path
  * (type-specific hash map + id append). Each invocation encodes
@@ -62,50 +67,52 @@ import org.openjdk.jmh.infra.Blackhole;
 @Fork(1)
 @Warmup(iterations = 3, time = 1)
 @Measurement(iterations = 5, time = 1)
-@State(Scope.Thread)
 public class DictionaryEncodingBenchmark {
 
   static final int VALUE_COUNT = 100_000;
   private static final int MAX_DICT_BYTE_SIZE = 4 * 1024 * 1024;
 
-  @Param({"LOW_CARDINALITY", "HIGH_CARDINALITY"})
-  public String dataPattern;
+  // ==== Fixed-width numeric types (parameterised by dataPattern) ====
 
-  private int[] intData;
-  private long[] longData;
-  private float[] floatData;
-  private double[] doubleData;
+  @State(Scope.Thread)
+  public static class NumericState {
+    @Param({"LOW_CARDINALITY", "HIGH_CARDINALITY"})
+    public String dataPattern;
 
-  @Setup(Level.Trial)
-  public void setup() {
-    int distinct = "LOW_CARDINALITY".equals(dataPattern)
-        ? TestDataFactory.LOW_CARDINALITY_DISTINCT
-        : 0; // 0 = all unique for HIGH_CARDINALITY
+    int[] intData;
+    long[] longData;
+    float[] floatData;
+    double[] doubleData;
 
-    long seed = TestDataFactory.DEFAULT_SEED;
+    @Setup(Level.Trial)
+    public void setup() {
+      int distinct = "LOW_CARDINALITY".equals(dataPattern)
+          ? TestDataFactory.LOW_CARDINALITY_DISTINCT
+          : 0; // 0 = all unique for HIGH_CARDINALITY
 
-    if (distinct > 0) {
-      intData = TestDataFactory.generateLowCardinalityInts(VALUE_COUNT, distinct, seed);
-      longData = TestDataFactory.generateLowCardinalityLongs(VALUE_COUNT, distinct, seed);
-      floatData = TestDataFactory.generateLowCardinalityFloats(VALUE_COUNT, distinct, seed);
-      doubleData = TestDataFactory.generateLowCardinalityDoubles(VALUE_COUNT, distinct, seed);
-    } else {
-      intData = TestDataFactory.generateRandomInts(VALUE_COUNT, seed);
-      longData = TestDataFactory.generateRandomLongs(VALUE_COUNT, seed);
-      floatData = TestDataFactory.generateRandomFloats(VALUE_COUNT, seed);
-      doubleData = TestDataFactory.generateRandomDoubles(VALUE_COUNT, seed);
+      long seed = TestDataFactory.DEFAULT_SEED;
+
+      if (distinct > 0) {
+        intData = TestDataFactory.generateLowCardinalityInts(VALUE_COUNT, distinct, seed);
+        longData = TestDataFactory.generateLowCardinalityLongs(VALUE_COUNT, distinct, seed);
+        floatData = TestDataFactory.generateLowCardinalityFloats(VALUE_COUNT, distinct, seed);
+        doubleData = TestDataFactory.generateLowCardinalityDoubles(VALUE_COUNT, distinct, seed);
+      } else {
+        intData = TestDataFactory.generateRandomInts(VALUE_COUNT, seed);
+        longData = TestDataFactory.generateRandomLongs(VALUE_COUNT, seed);
+        floatData = TestDataFactory.generateRandomFloats(VALUE_COUNT, seed);
+        doubleData = TestDataFactory.generateRandomDoubles(VALUE_COUNT, seed);
+      }
     }
   }
 
-  // ==== Fixed-width numeric encode benchmarks ====
-
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public void encodeInt(Blackhole bh) throws IOException {
+  public void encodeInt(NumericState state, Blackhole bh) throws IOException {
     DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter w =
         new DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter(
             MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
-    for (int v : intData) {
+    for (int v : state.intData) {
       w.writeInteger(v);
     }
     BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
@@ -115,11 +122,11 @@ public class DictionaryEncodingBenchmark {
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public void encodeLong(Blackhole bh) throws IOException {
+  public void encodeLong(NumericState state, Blackhole bh) throws IOException {
     DictionaryValuesWriter.PlainLongDictionaryValuesWriter w =
         new DictionaryValuesWriter.PlainLongDictionaryValuesWriter(
             MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
-    for (long v : longData) {
+    for (long v : state.longData) {
       w.writeLong(v);
     }
     BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
@@ -129,11 +136,11 @@ public class DictionaryEncodingBenchmark {
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public void encodeFloat(Blackhole bh) throws IOException {
+  public void encodeFloat(NumericState state, Blackhole bh) throws IOException {
     DictionaryValuesWriter.PlainFloatDictionaryValuesWriter w =
         new DictionaryValuesWriter.PlainFloatDictionaryValuesWriter(
             MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
-    for (float v : floatData) {
+    for (float v : state.floatData) {
       w.writeFloat(v);
     }
     BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
@@ -143,11 +150,11 @@ public class DictionaryEncodingBenchmark {
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public void encodeDouble(Blackhole bh) throws IOException {
+  public void encodeDouble(NumericState state, Blackhole bh) throws IOException {
     DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter w =
         new DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter(
             MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
-    for (double v : doubleData) {
+    for (double v : state.doubleData) {
       w.writeDouble(v);
     }
     BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
