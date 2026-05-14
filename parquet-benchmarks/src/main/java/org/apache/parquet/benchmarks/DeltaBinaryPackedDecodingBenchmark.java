@@ -26,6 +26,7 @@ import org.apache.parquet.bytes.HeapByteBufferAllocator;
 import org.apache.parquet.column.values.ValuesWriter;
 import org.apache.parquet.column.values.delta.DeltaBinaryPackingValuesReader;
 import org.apache.parquet.column.values.delta.DeltaBinaryPackingValuesWriterForInteger;
+import org.apache.parquet.column.values.delta.DeltaBinaryPackingValuesWriterForLong;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -42,17 +43,17 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Encoding and decoding micro-benchmarks for INT32 DELTA_BINARY_PACKED.
- * Exercises delta encoding across different data distribution patterns.
+ * Decoding-level micro-benchmarks for the DELTA_BINARY_PACKED encoding across
+ * the Parquet types that support it: {@code INT32} and {@code INT64}.
+ * Encoding benchmarks live in {@link DeltaBinaryPackedEncodingBenchmark}.
  *
- * <p>PLAIN encoding benchmarks live in {@link PlainEncodingBenchmark} and
- * {@link PlainDecodingBenchmark}. BYTE_STREAM_SPLIT benchmarks live in
- * {@link ByteStreamSplitEncodingBenchmark} and
- * {@link ByteStreamSplitDecodingBenchmark}. Dictionary benchmarks live in
- * {@link DictionaryEncodingBenchmark} and {@link DictionaryDecodingBenchmark}.
+ * <p>The {@code dataPattern} parameter exercises delta decoding across
+ * different value distributions: sequential (small constant deltas), random
+ * (large varying deltas), low-cardinality (many zero deltas from repeated
+ * values), and high-cardinality (all unique, shuffled).
  *
- * <p>Each benchmark invocation processes {@value #VALUE_COUNT} values. Throughput is
- * reported per-value using {@link OperationsPerInvocation}.
+ * <p>Each invocation decodes {@value #VALUE_COUNT} values; throughput is
+ * reported per-value via {@link OperationsPerInvocation}.
  */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -60,7 +61,7 @@ import org.openjdk.jmh.infra.Blackhole;
 @Warmup(iterations = 3, time = 1)
 @Measurement(iterations = 5, time = 1)
 @State(Scope.Thread)
-public class IntEncodingBenchmark {
+public class DeltaBinaryPackedDecodingBenchmark {
 
   static final int VALUE_COUNT = 100_000;
   private static final int INIT_SLAB_SIZE = 64 * 1024;
@@ -69,65 +70,80 @@ public class IntEncodingBenchmark {
   @Param({"SEQUENTIAL", "RANDOM", "LOW_CARDINALITY", "HIGH_CARDINALITY"})
   public String dataPattern;
 
-  private int[] data;
-  private byte[] deltaEncoded;
+  private byte[] intPage;
+  private byte[] longPage;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
+    long seed = TestDataFactory.DEFAULT_SEED;
+    int distinct = TestDataFactory.LOW_CARDINALITY_DISTINCT;
+
+    int[] intData;
+    long[] longData;
+
     switch (dataPattern) {
       case "SEQUENTIAL":
-        data = TestDataFactory.generateSequentialInts(VALUE_COUNT);
+        intData = TestDataFactory.generateSequentialInts(VALUE_COUNT);
+        longData = TestDataFactory.generateSequentialLongs(VALUE_COUNT);
         break;
       case "RANDOM":
-        data = TestDataFactory.generateRandomInts(VALUE_COUNT, TestDataFactory.DEFAULT_SEED);
+        intData = TestDataFactory.generateRandomInts(VALUE_COUNT, seed);
+        longData = TestDataFactory.generateRandomLongs(VALUE_COUNT, seed);
         break;
       case "LOW_CARDINALITY":
-        data = TestDataFactory.generateLowCardinalityInts(
-            VALUE_COUNT, TestDataFactory.LOW_CARDINALITY_DISTINCT, TestDataFactory.DEFAULT_SEED);
+        intData = TestDataFactory.generateLowCardinalityInts(VALUE_COUNT, distinct, seed);
+        longData = TestDataFactory.generateLowCardinalityLongs(VALUE_COUNT, distinct, seed);
         break;
       case "HIGH_CARDINALITY":
-        data = TestDataFactory.generateHighCardinalityInts(VALUE_COUNT, TestDataFactory.DEFAULT_SEED);
+        intData = TestDataFactory.generateHighCardinalityInts(VALUE_COUNT, seed);
+        longData = TestDataFactory.generateHighCardinalityLongs(VALUE_COUNT, seed);
         break;
       default:
         throw new IllegalArgumentException("Unknown data pattern: " + dataPattern);
     }
 
-    // Pre-encode data for decode benchmarks
-    deltaEncoded = encodeWith(newDeltaWriter());
-  }
-
-  private byte[] encodeWith(ValuesWriter writer) throws IOException {
-    for (int v : data) {
-      writer.writeInteger(v);
+    // Pre-encode pages for decode benchmarks
+    {
+      ValuesWriter w = new DeltaBinaryPackingValuesWriterForInteger(
+          INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+      for (int v : intData) {
+        w.writeInteger(v);
+      }
+      intPage = w.getBytes().toByteArray();
+      w.close();
     }
-    byte[] bytes = writer.getBytes().toByteArray();
-    writer.close();
-    return bytes;
+    {
+      ValuesWriter w = new DeltaBinaryPackingValuesWriterForLong(
+          INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+      for (long v : longData) {
+        w.writeLong(v);
+      }
+      longPage = w.getBytes().toByteArray();
+      w.close();
+    }
   }
 
-  // ---- Writer factories ----
-
-  private static DeltaBinaryPackingValuesWriterForInteger newDeltaWriter() {
-    return new DeltaBinaryPackingValuesWriterForInteger(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
-  }
-
-  // ---- Encode benchmarks ----
+  // ---- INT32 ----
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
-  public byte[] encodeDelta() throws IOException {
-    return encodeWith(newDeltaWriter());
-  }
-
-  // ---- Decode benchmarks ----
-
-  @Benchmark
-  @OperationsPerInvocation(VALUE_COUNT)
-  public void decodeDelta(Blackhole bh) throws IOException {
+  public void decodeInt(Blackhole bh) throws IOException {
     DeltaBinaryPackingValuesReader reader = new DeltaBinaryPackingValuesReader();
-    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(deltaEncoded)));
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(intPage)));
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(reader.readInteger());
+    }
+  }
+
+  // ---- INT64 ----
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeLong(Blackhole bh) throws IOException {
+    DeltaBinaryPackingValuesReader reader = new DeltaBinaryPackingValuesReader();
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(longPage)));
+    for (int i = 0; i < VALUE_COUNT; i++) {
+      bh.consume(reader.readLong());
     }
   }
 }

@@ -46,8 +46,9 @@ import org.openjdk.jmh.infra.Blackhole;
  * Encoding and decoding micro-benchmarks for synthetic dictionary-id pages using
  * {@link RunLengthBitPackingHybridEncoder} and {@link RunLengthBitPackingHybridDecoder}.
  * This isolates the RLE/bit-packing hybrid codec paths and is intentionally
- * separate from {@link IntEncodingBenchmark}, which measures full INT32 value
- * encode/decode paths.
+ * separate from {@link DeltaBinaryPackedEncodingBenchmark} and
+ * {@link DeltaBinaryPackedDecodingBenchmark}, which measure full INT32/INT64
+ * value encode/decode paths.
  *
  * <p>The encode benchmark measures the RLE encoder's {@code pack32Values} fast path
  * and bit-packing throughput. The decode benchmark measures the corresponding
