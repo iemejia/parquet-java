@@ -46,8 +46,10 @@ import org.openjdk.jmh.annotations.Warmup;
  * <p>Decoding benchmarks live in {@link DeltaLengthByteArrayDecodingBenchmark}.
  *
  * <p>The {@code stringLength} parameter exercises the encoding across different
- * value sizes. Length encoding cost is roughly constant, but raw-byte throughput
- * varies with value size.
+ * value sizes. The {@code dataPattern} parameter controls whether all values
+ * have identical length (UNIFORM_LENGTH — length deltas are all zero) or
+ * varying lengths (VARIABLE_LENGTH — non-trivial deltas that exercise the
+ * DELTA_BINARY_PACKED sub-encoding of lengths).
  *
  * <p>Each invocation encodes {@value #VALUE_COUNT} values; throughput is
  * reported per-value via {@link OperationsPerInvocation}.
@@ -67,11 +69,25 @@ public class DeltaLengthByteArrayEncodingBenchmark {
   @Param({"10", "100", "1000"})
   public int stringLength;
 
+  @Param({"UNIFORM_LENGTH", "VARIABLE_LENGTH"})
+  public String dataPattern;
+
   private Binary[] data;
 
   @Setup(Level.Trial)
   public void setup() {
-    data = TestDataFactory.generateBinaryData(VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
+    switch (dataPattern) {
+      case "UNIFORM_LENGTH":
+        data = TestDataFactory.generateBinaryData(
+            VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
+        break;
+      case "VARIABLE_LENGTH":
+        data = TestDataFactory.generateVariableLengthBinaryData(
+            VALUE_COUNT, stringLength, TestDataFactory.DEFAULT_SEED);
+        break;
+      default:
+        throw new IllegalArgumentException("Unknown data pattern: " + dataPattern);
+    }
   }
 
   private static DeltaLengthByteArrayValuesWriter newWriter() {

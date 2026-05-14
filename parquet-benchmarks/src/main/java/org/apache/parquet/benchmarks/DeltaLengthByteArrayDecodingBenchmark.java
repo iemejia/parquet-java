@@ -47,7 +47,8 @@ import org.openjdk.jmh.infra.Blackhole;
  * Encoding benchmarks live in {@link DeltaLengthByteArrayEncodingBenchmark}.
  *
  * <p>The {@code stringLength} parameter exercises the decoding across different
- * value sizes.
+ * value sizes. The {@code dataPattern} parameter controls whether all values
+ * have identical length (UNIFORM_LENGTH) or varying lengths (VARIABLE_LENGTH).
  *
  * <p>Each invocation decodes {@value #VALUE_COUNT} values; throughput is
  * reported per-value via {@link OperationsPerInvocation}.
@@ -67,13 +68,29 @@ public class DeltaLengthByteArrayDecodingBenchmark {
   @Param({"10", "100", "1000"})
   public int stringLength;
 
+  @Param({"UNIFORM_LENGTH", "VARIABLE_LENGTH"})
+  public String dataPattern;
+
   private byte[] encoded;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
-    Binary[] data = TestDataFactory.generateBinaryData(VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
+    Binary[] data;
+    switch (dataPattern) {
+      case "UNIFORM_LENGTH":
+        data = TestDataFactory.generateBinaryData(
+            VALUE_COUNT, stringLength, 0, TestDataFactory.DEFAULT_SEED);
+        break;
+      case "VARIABLE_LENGTH":
+        data = TestDataFactory.generateVariableLengthBinaryData(
+            VALUE_COUNT, stringLength, TestDataFactory.DEFAULT_SEED);
+        break;
+      default:
+        throw new IllegalArgumentException("Unknown data pattern: " + dataPattern);
+    }
 
-    ValuesWriter w = new DeltaLengthByteArrayValuesWriter(INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    ValuesWriter w = new DeltaLengthByteArrayValuesWriter(
+        INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
     for (Binary v : data) {
       w.writeBytes(v);
     }

@@ -392,6 +392,29 @@ public final class TestDataFactory {
     return data;
   }
 
+  // ---- Variable-length data generation for delta encoding benchmarks ----
+
+  /**
+   * Generates all-unique binary strings with lengths uniformly distributed in
+   * {@code [1, maxLength]}. Useful for benchmarking DELTA_LENGTH_BYTE_ARRAY
+   * encoding, where non-zero length deltas exercise the DELTA_BINARY_PACKED
+   * sub-encoding of lengths (unlike uniform-length data where deltas are all zero).
+   *
+   * @param count     number of values
+   * @param maxLength maximum string length (inclusive)
+   * @param seed      RNG seed
+   */
+  public static Binary[] generateVariableLengthBinaryData(int count, int maxLength, long seed) {
+    Random random = new Random(seed);
+    Binary[] data = new Binary[count];
+    for (int i = 0; i < count; i++) {
+      int length = 1 + random.nextInt(maxLength);
+      data[i] = Binary.fromConstantByteArray(
+          randomString(length, random).getBytes(StandardCharsets.UTF_8));
+    }
+    return data;
+  }
+
   private static String randomString(int length, Random random) {
     StringBuilder sb = new StringBuilder(length);
     for (int i = 0; i < length; i++) {
