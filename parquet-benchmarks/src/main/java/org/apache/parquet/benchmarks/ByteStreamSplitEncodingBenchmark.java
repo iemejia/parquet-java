@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.parquet.bytes.HeapByteBufferAllocator;
 import org.apache.parquet.column.values.ValuesWriter;
 import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesWriter;
+import org.apache.parquet.io.api.Binary;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -32,15 +33,20 @@ import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OperationsPerInvocation;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
 
 /**
- * Encoding-level micro-benchmarks for the BYTE_STREAM_SPLIT encoding across the four
- * primitive widths supported by Parquet ({@code FLOAT}, {@code DOUBLE}, {@code INT32},
- * {@code INT64}).
+ * Encoding-level micro-benchmarks for the BYTE_STREAM_SPLIT encoding across all
+ * Parquet types that support it: {@code FLOAT}, {@code DOUBLE}, {@code INT32},
+ * {@code INT64}, and {@code FIXED_LEN_BYTE_ARRAY}.
+ *
+ * <p>Fixed-width numeric types are benchmarked directly by top-level methods.
+ * {@code FIXED_LEN_BYTE_ARRAY} uses an inner {@link FlbaState} parameterised by
+ * {@code fixedLength} to avoid cross-product pollution with the numeric benchmarks.
  *
  * <p>Each invocation encodes {@value #VALUE_COUNT} values; throughput is reported
  * per-value via {@link OperationsPerInvocation}.
@@ -105,6 +111,28 @@ public class ByteStreamSplitEncodingBenchmark {
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeFloatBatch() throws IOException {
+    ValuesWriter w = new ByteStreamSplitValuesWriter.FloatByteStreamSplitValuesWriter(
+        INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    w.writeFloats(floatData, 0, VALUE_COUNT);
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeDoubleBatch() throws IOException {
+    ValuesWriter w = new ByteStreamSplitValuesWriter.DoubleByteStreamSplitValuesWriter(
+        INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    w.writeDoubles(doubleData, 0, VALUE_COUNT);
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
   public byte[] encodeInt() throws IOException {
     ValuesWriter w = new ByteStreamSplitValuesWriter.IntegerByteStreamSplitValuesWriter(
         INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
@@ -124,6 +152,69 @@ public class ByteStreamSplitEncodingBenchmark {
     for (long v : longData) {
       w.writeLong(v);
     }
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeIntBatch() throws IOException {
+    ValuesWriter w = new ByteStreamSplitValuesWriter.IntegerByteStreamSplitValuesWriter(
+        INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    w.writeIntegers(intData, 0, VALUE_COUNT);
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeLongBatch() throws IOException {
+    ValuesWriter w = new ByteStreamSplitValuesWriter.LongByteStreamSplitValuesWriter(
+        INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    w.writeLongs(longData, 0, VALUE_COUNT);
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  // ---- FIXED_LEN_BYTE_ARRAY (parameterised by fixedLength) ----
+
+  @State(Scope.Thread)
+  public static class FlbaState {
+    @Param({"2", "12", "16"})
+    public int fixedLength;
+
+    Binary[] data;
+
+    @Setup(Level.Trial)
+    public void setup() {
+      data = TestDataFactory.generateFixedLenByteArrays(
+          VALUE_COUNT, fixedLength, 0, TestDataFactory.DEFAULT_SEED);
+    }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeFlba(FlbaState state) throws IOException {
+    ValuesWriter w = new ByteStreamSplitValuesWriter.FixedLenByteArrayByteStreamSplitValuesWriter(
+        state.fixedLength, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    for (Binary v : state.data) {
+      w.writeBytes(v);
+    }
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeFlbaBatch(FlbaState state) throws IOException {
+    ByteStreamSplitValuesWriter.FixedLenByteArrayByteStreamSplitValuesWriter w =
+        new ByteStreamSplitValuesWriter.FixedLenByteArrayByteStreamSplitValuesWriter(
+            state.fixedLength, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    w.writeBinaries(state.data, 0, VALUE_COUNT);
     byte[] bytes = w.getBytes().toByteArray();
     w.close();
     return bytes;

@@ -21,11 +21,13 @@ package org.apache.parquet.benchmarks;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.BINARY;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.BOOLEAN;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.DOUBLE;
+import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.FLOAT;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT32;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Random;
 import org.apache.parquet.example.data.Group;
 import org.apache.parquet.example.data.simple.SimpleGroupFactory;
@@ -47,6 +49,9 @@ public final class TestDataFactory {
   /** Default RNG seed used across benchmarks for deterministic data. */
   public static final long DEFAULT_SEED = 42L;
 
+  /** Byte length of the fixed-length byte array field in the benchmark schema. */
+  public static final int FLBA_LENGTH = 12;
+
   /** A standard multi-type schema used by file-level benchmarks. */
   public static final MessageType FILE_BENCHMARK_SCHEMA = Types.buildMessage()
       .required(INT32)
@@ -61,6 +66,9 @@ public final class TestDataFactory {
       .named("boolean_field")
       .required(BINARY)
       .named("binary_field")
+      .required(FIXED_LEN_BYTE_ARRAY)
+      .length(FLBA_LENGTH)
+      .named("flba_field")
       .named("benchmark_record");
 
   private TestDataFactory() {}
@@ -81,13 +89,16 @@ public final class TestDataFactory {
    * @return a populated Group
    */
   public static Group generateRow(SimpleGroupFactory factory, int index, Random random) {
+    byte[] flbaBytes = new byte[FLBA_LENGTH];
+    random.nextBytes(flbaBytes);
     return factory.newGroup()
         .append("int32_field", index)
         .append("int64_field", (long) index * 100)
         .append("float_field", random.nextFloat())
         .append("double_field", random.nextDouble())
         .append("boolean_field", index % 2 == 0)
-        .append("binary_field", "value_" + (index % 1000));
+        .append("binary_field", "value_" + (index % 1000))
+        .append("flba_field", Binary.fromConstantByteArray(flbaBytes));
   }
 
   /**
@@ -363,6 +374,52 @@ public final class TestDataFactory {
         data[i] = Binary.fromConstantByteArray(
             randomString(stringLength, random).getBytes(StandardCharsets.UTF_8));
       }
+    }
+    return data;
+  }
+
+  // ---- Sorted data generation for delta encoding benchmarks ----
+
+  /**
+   * Generates all-unique binary strings of the given length, sorted in natural
+   * ({@link Binary#compareTo}) order. Useful for benchmarking DELTA_BYTE_ARRAY
+   * encoding, which benefits from prefix sharing between consecutive values.
+   */
+  public static Binary[] generateSortedBinaryData(int count, int stringLength, long seed) {
+    Binary[] data = generateBinaryData(count, stringLength, 0, seed);
+    Arrays.sort(data);
+    return data;
+  }
+
+  /**
+   * Generates all-unique fixed-length byte arrays, sorted in natural
+   * ({@link Binary#compareTo}) order. Useful for benchmarking DELTA_BYTE_ARRAY
+   * encoding with FIXED_LEN_BYTE_ARRAY values.
+   */
+  public static Binary[] generateSortedFixedLenByteArrays(int count, int fixedLength, long seed) {
+    Binary[] data = generateFixedLenByteArrays(count, fixedLength, 0, seed);
+    Arrays.sort(data);
+    return data;
+  }
+
+  // ---- Variable-length data generation for delta encoding benchmarks ----
+
+  /**
+   * Generates all-unique binary strings with lengths uniformly distributed in
+   * {@code [1, maxLength]}. Useful for benchmarking DELTA_LENGTH_BYTE_ARRAY
+   * encoding, where non-zero length deltas exercise the DELTA_BINARY_PACKED
+   * sub-encoding of lengths (unlike uniform-length data where deltas are all zero).
+   *
+   * @param count     number of values
+   * @param maxLength maximum string length (inclusive)
+   * @param seed      RNG seed
+   */
+  public static Binary[] generateVariableLengthBinaryData(int count, int maxLength, long seed) {
+    Random random = new Random(seed);
+    Binary[] data = new Binary[count];
+    for (int i = 0; i < count; i++) {
+      int length = 1 + random.nextInt(maxLength);
+      data[i] = Binary.fromConstantByteArray(randomString(length, random).getBytes(StandardCharsets.UTF_8));
     }
     return data;
   }

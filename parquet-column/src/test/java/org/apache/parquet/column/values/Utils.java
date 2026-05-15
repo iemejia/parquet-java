@@ -60,6 +60,14 @@ public class Utils {
     return bins;
   }
 
+  public static Binary[] readDataBatch(ValuesReader reader, ByteBufferInputStream stream, int length)
+      throws IOException {
+    Binary[] bins = new Binary[length];
+    reader.initFromPage(length, stream);
+    reader.readBinaries(bins, 0, length);
+    return bins;
+  }
+
   public static int[] readInts(ValuesReader reader, ByteBufferInputStream stream, int length) throws IOException {
     int[] ints = new int[length];
     reader.initFromPage(length, stream);

@@ -24,8 +24,6 @@ import java.nio.ByteOrder;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.column.values.ValuesReader;
 import org.apache.parquet.io.api.Binary;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Plain encoding reader for BINARY values.
@@ -35,7 +33,6 @@ import org.slf4j.LoggerFactory;
  * {@code InputStream.read()} calls through {@link org.apache.parquet.bytes.BytesUtils#readIntLittleEndian}.
  */
 public class BinaryPlainValuesReader extends ValuesReader {
-  private static final Logger LOG = LoggerFactory.getLogger(BinaryPlainValuesReader.class);
   private ByteBuffer buffer;
 
   @Override
@@ -48,6 +45,17 @@ public class BinaryPlainValuesReader extends ValuesReader {
   }
 
   @Override
+  public void readBinaries(Binary[] dest, int offset, int count) {
+    for (int i = 0; i < count; i++) {
+      int length = buffer.getInt();
+      ByteBuffer valueSlice = buffer.slice();
+      valueSlice.limit(length);
+      buffer.position(buffer.position() + length);
+      dest[offset + i] = Binary.fromConstantByteBuffer(valueSlice);
+    }
+  }
+
+  @Override
   public void skip() {
     int length = buffer.getInt();
     buffer.position(buffer.position() + length);
@@ -55,10 +63,6 @@ public class BinaryPlainValuesReader extends ValuesReader {
 
   @Override
   public void initFromPage(int valueCount, ByteBufferInputStream stream) throws IOException {
-    LOG.debug(
-        "init from page at offset {} for length {}",
-        stream.position(),
-        (stream.available() - stream.position()));
     int available = stream.available();
     if (available > 0) {
       this.buffer = stream.slice(available).order(ByteOrder.LITTLE_ENDIAN);

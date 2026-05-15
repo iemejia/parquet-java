@@ -43,12 +43,18 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Decoding micro-benchmark for synthetic dictionary-id pages encoded with
- * {@link RunLengthBitPackingHybridEncoder}. This isolates the dictionary-id
- * decode path and is intentionally separate from {@link IntEncodingBenchmark},
- * which measures full INT32 value decode paths.
+ * Encoding and decoding micro-benchmarks for synthetic dictionary-id pages using
+ * {@link RunLengthBitPackingHybridEncoder} and {@link RunLengthBitPackingHybridDecoder}.
+ * This isolates the RLE/bit-packing hybrid codec paths and is intentionally
+ * separate from {@link DeltaBinaryPackedEncodingBenchmark} and
+ * {@link DeltaBinaryPackedDecodingBenchmark}, which measure full INT32/INT64
+ * value encode/decode paths.
  *
- * <p>Per-invocation overhead (decoder construction and {@link ByteBufferInputStream}
+ * <p>The encode benchmark measures the RLE encoder's {@code pack32Values} fast path
+ * and bit-packing throughput. The decode benchmark measures the corresponding
+ * {@code unpack32Values} fast path and RLE run expansion.
+ *
+ * <p>Per-invocation overhead (encoder/decoder construction and {@link ByteBufferInputStream}
  * wrapping) is amortized over {@value #VALUE_COUNT} reads via
  * {@link OperationsPerInvocation}.
  */
@@ -78,10 +84,10 @@ public class RleDictionaryIndexDecodingBenchmark {
 
   private byte[] encoded;
 
+  private int[] ids;
+
   // encoded with 4-byte LE length prefix, as expected by ValuesReader.initFromPage()
   private byte[] encodedWithLengthPrefix;
-
-  private int[] ids;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
@@ -126,6 +132,16 @@ public class RleDictionaryIndexDecodingBenchmark {
       for (int id : ids) {
         encoder.writeInt(id);
       }
+      return encoder.toBytes().toByteArray();
+    }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeDictionaryIdsBatch() throws IOException {
+    try (RunLengthBitPackingHybridEncoder encoder = new RunLengthBitPackingHybridEncoder(
+        BIT_WIDTH, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator())) {
+      encoder.writeInts(ids, 0, VALUE_COUNT);
       return encoder.toBytes().toByteArray();
     }
   }

@@ -48,6 +48,15 @@ public class RunLengthBitPackingHybridValuesWriter extends ValuesWriter {
   }
 
   @Override
+  public void writeIntegers(int[] values, int offset, int length) {
+    try {
+      encoder.writeInts(values, offset, length);
+    } catch (IOException e) {
+      throw new ParquetEncodingException(e);
+    }
+  }
+
+  @Override
   public void writeBoolean(boolean v) {
     writeInteger(v ? 1 : 0);
   }

@@ -26,10 +26,12 @@ import org.apache.parquet.bytes.HeapByteBufferAllocator;
 import org.apache.parquet.column.values.ValuesWriter;
 import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesReader;
 import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesReaderForDouble;
+import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesReaderForFLBA;
 import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesReaderForFloat;
 import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesReaderForInteger;
 import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesReaderForLong;
 import org.apache.parquet.column.values.bytestreamsplit.ByteStreamSplitValuesWriter;
+import org.apache.parquet.io.api.Binary;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -38,6 +40,7 @@ import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OperationsPerInvocation;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
@@ -45,9 +48,14 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Decoding-level micro-benchmarks for the BYTE_STREAM_SPLIT encoding across the four
- * primitive widths supported by Parquet ({@code FLOAT}, {@code DOUBLE}, {@code INT32},
- * {@code INT64}).
+ * Decoding-level micro-benchmarks for the BYTE_STREAM_SPLIT encoding across all
+ * Parquet types that support it: {@code FLOAT}, {@code DOUBLE}, {@code INT32},
+ * {@code INT64}, and {@code FIXED_LEN_BYTE_ARRAY}.
+ *
+ * <p>Fixed-width numeric types are benchmarked directly by top-level methods (both
+ * scalar and batch variants). {@code FIXED_LEN_BYTE_ARRAY} uses an inner
+ * {@link FlbaState} parameterised by {@code fixedLength} to avoid cross-product
+ * pollution with the numeric benchmarks.
  *
  * <p>Each invocation decodes {@value #VALUE_COUNT} values; throughput is reported
  * per-value via {@link OperationsPerInvocation}. The cost includes both
@@ -213,5 +221,49 @@ public class ByteStreamSplitDecodingBenchmark {
     init(r, longPage);
     r.readLongs(longDest, 0, VALUE_COUNT);
     bh.consume(longDest);
+  }
+
+  // ---- FIXED_LEN_BYTE_ARRAY (parameterised by fixedLength) ----
+
+  @State(Scope.Thread)
+  public static class FlbaState {
+    @Param({"2", "12", "16"})
+    public int fixedLength;
+
+    byte[] flbaPage;
+    Binary[] flbaDest;
+
+    @Setup(Level.Trial)
+    public void setup() throws IOException {
+      Binary[] data = TestDataFactory.generateFixedLenByteArrays(
+          VALUE_COUNT, fixedLength, 0, TestDataFactory.DEFAULT_SEED);
+      ValuesWriter w = new ByteStreamSplitValuesWriter.FixedLenByteArrayByteStreamSplitValuesWriter(
+          fixedLength, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+      for (Binary v : data) {
+        w.writeBytes(v);
+      }
+      flbaPage = w.getBytes().toByteArray();
+      w.close();
+      flbaDest = new Binary[VALUE_COUNT];
+    }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeFlba(FlbaState state, Blackhole bh) throws IOException {
+    ByteStreamSplitValuesReaderForFLBA r = new ByteStreamSplitValuesReaderForFLBA(state.fixedLength);
+    init(r, state.flbaPage);
+    for (int i = 0; i < VALUE_COUNT; i++) {
+      bh.consume(r.readBytes());
+    }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeFlbaBatch(FlbaState state, Blackhole bh) throws IOException {
+    ByteStreamSplitValuesReaderForFLBA r = new ByteStreamSplitValuesReaderForFLBA(state.fixedLength);
+    init(r, state.flbaPage);
+    r.readBinaries(state.flbaDest, 0, VALUE_COUNT);
+    bh.consume(state.flbaDest);
   }
 }

@@ -181,6 +181,26 @@ public class TestDictionary {
   }
 
   @Test
+  public void testBinaryDictionaryBatchRead() throws IOException {
+    int COUNT = 100;
+    try (ValuesWriter cw = newPlainBinaryDictionaryValuesWriter(200, 10000)) {
+      writeRepeated(COUNT, cw, "a");
+      BytesInput bytes1 = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+      writeRepeated(COUNT, cw, "b");
+      BytesInput bytes2 = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+      // now we will fall back
+      writeDistinct(COUNT, cw, "c");
+      BytesInput bytes3 = getBytesAndCheckEncoding(cw, PLAIN);
+
+      DictionaryValuesReader cr = initDicReader(cw, BINARY);
+      checkRepeatedBatch(COUNT, bytes1, cr, "a");
+      checkRepeatedBatch(COUNT, bytes2, cr, "b");
+      BinaryPlainValuesReader cr2 = new BinaryPlainValuesReader();
+      checkDistinctBatch(COUNT, bytes3, cr2, "c");
+    }
+  }
+
+  @Test
   public void testBinaryDictionaryFallBack() throws IOException {
     int slabSize = 100;
     int maxDictionaryByteSize = 50;
@@ -766,6 +786,24 @@ public class TestDictionary {
     cr.initFromPage(COUNT, bytes.toInputStream());
     for (int i = 0; i < COUNT; i++) {
       Assert.assertEquals(prefix + i % 10, cr.readBytes().toStringUsingUTF8());
+    }
+  }
+
+  private void checkDistinctBatch(int COUNT, BytesInput bytes, ValuesReader cr, String prefix) throws IOException {
+    Binary[] dest = new Binary[COUNT];
+    cr.initFromPage(COUNT, bytes.toInputStream());
+    cr.readBinaries(dest, 0, COUNT);
+    for (int i = 0; i < COUNT; i++) {
+      Assert.assertEquals(prefix + i, dest[i].toStringUsingUTF8());
+    }
+  }
+
+  private void checkRepeatedBatch(int COUNT, BytesInput bytes, ValuesReader cr, String prefix) throws IOException {
+    Binary[] dest = new Binary[COUNT];
+    cr.initFromPage(COUNT, bytes.toInputStream());
+    cr.readBinaries(dest, 0, COUNT);
+    for (int i = 0; i < COUNT; i++) {
+      Assert.assertEquals(prefix + i % 10, dest[i].toStringUsingUTF8());
     }
   }
 

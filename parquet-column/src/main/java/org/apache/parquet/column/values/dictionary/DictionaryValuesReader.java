@@ -133,6 +133,15 @@ public class DictionaryValuesReader extends ValuesReader {
   }
 
   @Override
+  public void readBinaries(Binary[] dest, int offset, int count) {
+    int[] ids = new int[count];
+    decoder.readInts(ids, 0, count);
+    for (int i = 0; i < count; i++) {
+      dest[offset + i] = dictionary.decodeToBinary(ids[i]);
+    }
+  }
+
+  @Override
   public void skip() {
     decoder.readInt(); // Type does not matter as we are just skipping dictionary keys
   }

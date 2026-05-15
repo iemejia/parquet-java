@@ -84,6 +84,32 @@ public class DeltaByteArrayReader extends ValuesReader implements RequiresPrevio
     return previous;
   }
 
+  @Override
+  public void readBinaries(Binary[] dest, int offset, int count) {
+    // Batch-decode prefix lengths and suffixes upfront
+    int[] prefixLengths = new int[count];
+    prefixLengthReader.readIntegers(prefixLengths, 0, count);
+    Binary[] suffixes = new Binary[count];
+    suffixReader.readBinaries(suffixes, 0, count);
+
+    // Reconstruct values sequentially (each depends on previous)
+    for (int i = 0; i < count; i++) {
+      int prefixLength = prefixLengths[i];
+      Binary suffix = suffixes[i];
+      int length = prefixLength + suffix.length();
+
+      if (prefixLength != 0) {
+        byte[] out = new byte[length];
+        System.arraycopy(previous.getBytesUnsafe(), 0, out, 0, prefixLength);
+        System.arraycopy(suffix.getBytesUnsafe(), 0, out, prefixLength, suffix.length());
+        previous = Binary.fromConstantByteArray(out);
+      } else {
+        previous = suffix;
+      }
+      dest[offset + i] = previous;
+    }
+  }
+
   /**
    * There was a bug (PARQUET-246) in which DeltaByteArrayWriter's reset() method did not
    * clear the previous value state that it tracks internally. This resulted in the first

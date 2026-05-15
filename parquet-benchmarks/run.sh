@@ -49,6 +49,7 @@ concurrent   | Multi-threaded concurrent read/write benchmarks.
 checksum     | Reading and writing with and without CRC checksums.
 filter       | Filtering column indexes.
 nested       | Nested null value writing benchmarks.
+variant      | Variant performance.
 
 Examples:
 
@@ -123,6 +124,9 @@ else
     ;;
   "nested")
     BENCHMARK_REGEX="org.apache.parquet.benchmarks.NestedNullWritingBenchmarks"
+    ;;
+  "variant")
+    BENCHMARK_REGEX="org.apache.parquet.variant.Variant*"
     ;;
   esac
 
