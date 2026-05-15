@@ -33,9 +33,28 @@ import org.slf4j.LoggerFactory;
  * <p>Direct bit extraction from the page ByteBuffer avoids the overhead of the generic
  * bit-packing machinery ({@code ByteBitPackingValuesReader}) and intermediate
  * {@code int[8]} buffers.
+ *
+ * <p>The batch path uses a static 256-entry lookup table that maps each byte value to
+ * its 8 pre-decoded booleans. This enables {@code System.arraycopy} of 8 booleans per
+ * byte (a single 64-bit memory operation in HotSpot) instead of 8 individual
+ * comparison+store operations.
  */
 public class BooleanPlainValuesReader extends ValuesReader {
   private static final Logger LOG = LoggerFactory.getLogger(BooleanPlainValuesReader.class);
+
+  /**
+   * Lookup table: BYTE_TO_BOOLS[b] contains the 8 boolean values for byte value b,
+   * in little-endian bit order (bit 0 = index 0).
+   */
+  private static final boolean[][] BYTE_TO_BOOLS = new boolean[256][8];
+
+  static {
+    for (int b = 0; b < 256; b++) {
+      for (int bit = 0; bit < 8; bit++) {
+        BYTE_TO_BOOLS[b][bit] = ((b >>> bit) & 1) != 0;
+      }
+    }
+  }
 
   private byte[] pageData;
   private int pageOffset;
@@ -68,6 +87,44 @@ public class BooleanPlainValuesReader extends ValuesReader {
     int bitPos = bitIndex & 7;
     bitIndex++;
     return ((pageData[byteIdx] >>> bitPos) & 1) != 0;
+  }
+
+  @Override
+  public void readBooleans(boolean[] dest, int offset, int count) {
+    int i = 0;
+
+    // Handle partial byte at current position
+    int bitPos = bitIndex & 7;
+    if (bitPos != 0) {
+      int byteIdx = pageOffset + (bitIndex >>> 3);
+      byte b = pageData[byteIdx];
+      while (bitPos < 8 && i < count) {
+        dest[offset + i] = ((b >>> bitPos) & 1) != 0;
+        bitPos++;
+        i++;
+      }
+    }
+
+    // Process full bytes: 8 booleans per byte via lookup table + arraycopy
+    int byteIdx = pageOffset + ((bitIndex + i) >>> 3);
+    while (i + 8 <= count) {
+      System.arraycopy(BYTE_TO_BOOLS[pageData[byteIdx] & 0xFF], 0, dest, offset + i, 8);
+      byteIdx++;
+      i += 8;
+    }
+
+    // Handle remaining bits in the last partial byte
+    if (i < count) {
+      byte b = pageData[byteIdx];
+      int bp = 0;
+      while (i < count) {
+        dest[offset + i] = ((b >>> bp) & 1) != 0;
+        bp++;
+        i++;
+      }
+    }
+
+    bitIndex += count;
   }
 
   @Override

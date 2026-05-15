@@ -262,6 +262,114 @@ public class CapacityByteArrayOutputStream extends OutputStream {
     bytesUsed = Math.addExact(bytesUsed, 8);
   }
 
+  /**
+   * Writes multiple int values in little-endian byte order using bulk {@code IntBuffer} transfer.
+   * Amortizes capacity checks across the entire batch and leverages platform-optimized bulk put.
+   *
+   * @param values source array
+   * @param offset start index in values
+   * @param length number of ints to write
+   */
+  public void writeInts(int[] values, int offset, int length) {
+    int bytesNeeded = length * 4;
+    if (bytesNeeded <= currentSlab.remaining()) {
+      currentSlab.asIntBuffer().put(values, offset, length);
+      currentSlab.position(currentSlab.position() + bytesNeeded);
+    } else {
+      // Fill current slab, then continue into a new one
+      int fits = currentSlab.remaining() / 4;
+      if (fits > 0) {
+        currentSlab.asIntBuffer().put(values, offset, fits);
+        currentSlab.position(currentSlab.position() + fits * 4);
+      }
+      int remaining = length - fits;
+      addSlab(remaining * 4);
+      currentSlab.asIntBuffer().put(values, offset + fits, remaining);
+      currentSlab.position(currentSlab.position() + remaining * 4);
+    }
+    bytesUsed = Math.addExact(bytesUsed, bytesNeeded);
+  }
+
+  /**
+   * Writes multiple long values in little-endian byte order using bulk {@code LongBuffer} transfer.
+   *
+   * @param values source array
+   * @param offset start index in values
+   * @param length number of longs to write
+   */
+  public void writeLongs(long[] values, int offset, int length) {
+    int bytesNeeded = length * 8;
+    if (bytesNeeded <= currentSlab.remaining()) {
+      currentSlab.asLongBuffer().put(values, offset, length);
+      currentSlab.position(currentSlab.position() + bytesNeeded);
+    } else {
+      int fits = currentSlab.remaining() / 8;
+      if (fits > 0) {
+        currentSlab.asLongBuffer().put(values, offset, fits);
+        currentSlab.position(currentSlab.position() + fits * 8);
+      }
+      int remaining = length - fits;
+      addSlab(remaining * 8);
+      currentSlab.asLongBuffer().put(values, offset + fits, remaining);
+      currentSlab.position(currentSlab.position() + remaining * 8);
+    }
+    bytesUsed = Math.addExact(bytesUsed, bytesNeeded);
+  }
+
+  /**
+   * Writes multiple float values in little-endian byte order using bulk {@code FloatBuffer} transfer.
+   * The slab's LE byte order ensures correct IEEE 754 encoding without explicit
+   * {@code Float.floatToIntBits()} conversion.
+   *
+   * @param values source array
+   * @param offset start index in values
+   * @param length number of floats to write
+   */
+  public void writeFloats(float[] values, int offset, int length) {
+    int bytesNeeded = length * 4;
+    if (bytesNeeded <= currentSlab.remaining()) {
+      currentSlab.asFloatBuffer().put(values, offset, length);
+      currentSlab.position(currentSlab.position() + bytesNeeded);
+    } else {
+      int fits = currentSlab.remaining() / 4;
+      if (fits > 0) {
+        currentSlab.asFloatBuffer().put(values, offset, fits);
+        currentSlab.position(currentSlab.position() + fits * 4);
+      }
+      int remaining = length - fits;
+      addSlab(remaining * 4);
+      currentSlab.asFloatBuffer().put(values, offset + fits, remaining);
+      currentSlab.position(currentSlab.position() + remaining * 4);
+    }
+    bytesUsed = Math.addExact(bytesUsed, bytesNeeded);
+  }
+
+  /**
+   * Writes multiple double values in little-endian byte order using bulk {@code DoubleBuffer} transfer.
+   *
+   * @param values source array
+   * @param offset start index in values
+   * @param length number of doubles to write
+   */
+  public void writeDoubles(double[] values, int offset, int length) {
+    int bytesNeeded = length * 8;
+    if (bytesNeeded <= currentSlab.remaining()) {
+      currentSlab.asDoubleBuffer().put(values, offset, length);
+      currentSlab.position(currentSlab.position() + bytesNeeded);
+    } else {
+      int fits = currentSlab.remaining() / 8;
+      if (fits > 0) {
+        currentSlab.asDoubleBuffer().put(values, offset, fits);
+        currentSlab.position(currentSlab.position() + fits * 8);
+      }
+      int remaining = length - fits;
+      addSlab(remaining * 8);
+      currentSlab.asDoubleBuffer().put(values, offset + fits, remaining);
+      currentSlab.position(currentSlab.position() + remaining * 8);
+    }
+    bytesUsed = Math.addExact(bytesUsed, bytesNeeded);
+  }
+
   private void writeToOutput(OutputStream out, ByteBuffer buf, int len) throws IOException {
     if (buf.hasArray()) {
       out.write(buf.array(), buf.arrayOffset(), len);

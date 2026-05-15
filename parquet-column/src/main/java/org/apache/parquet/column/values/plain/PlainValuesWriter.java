@@ -76,6 +76,26 @@ public class PlainValuesWriter extends ValuesWriter {
   }
 
   @Override
+  public final void writeIntegers(int[] values, int offset, int length) {
+    arrayOut.writeInts(values, offset, length);
+  }
+
+  @Override
+  public final void writeLongs(long[] values, int offset, int length) {
+    arrayOut.writeLongs(values, offset, length);
+  }
+
+  @Override
+  public final void writeFloats(float[] values, int offset, int length) {
+    arrayOut.writeFloats(values, offset, length);
+  }
+
+  @Override
+  public final void writeDoubles(double[] values, int offset, int length) {
+    arrayOut.writeDoubles(values, offset, length);
+  }
+
+  @Override
   public void writeByte(int value) {
     arrayOut.write(value);
   }

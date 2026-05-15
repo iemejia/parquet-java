@@ -58,6 +58,50 @@ public class BooleanPlainValuesWriter extends ValuesWriter {
   }
 
   @Override
+  public void writeBooleans(boolean[] values, int offset, int length) {
+    int pos = offset;
+    int end = offset + length;
+
+    // Fill current partial byte
+    while (bitsWritten > 0 && bitsWritten < 8 && pos < end) {
+      if (values[pos]) {
+        currentByte |= (1 << bitsWritten);
+      }
+      bitsWritten++;
+      pos++;
+      if (bitsWritten == 8) {
+        baos.write(currentByte);
+        currentByte = 0;
+        bitsWritten = 0;
+      }
+    }
+
+    // Process 8 values at a time — pack directly into a byte
+    while (pos + 8 <= end) {
+      int b = 0;
+      if (values[pos]) b |= 0x01;
+      if (values[pos + 1]) b |= 0x02;
+      if (values[pos + 2]) b |= 0x04;
+      if (values[pos + 3]) b |= 0x08;
+      if (values[pos + 4]) b |= 0x10;
+      if (values[pos + 5]) b |= 0x20;
+      if (values[pos + 6]) b |= 0x40;
+      if (values[pos + 7]) b |= 0x80;
+      baos.write(b);
+      pos += 8;
+    }
+
+    // Handle remaining values (< 8)
+    while (pos < end) {
+      if (values[pos]) {
+        currentByte |= (1 << bitsWritten);
+      }
+      bitsWritten++;
+      pos++;
+    }
+  }
+
+  @Override
   public long getBufferedSize() {
     return baos.size() + (bitsWritten > 0 ? 1 : 0);
   }

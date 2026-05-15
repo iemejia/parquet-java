@@ -24,6 +24,8 @@ import static org.junit.Assert.assertTrue;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Arrays;
 import org.junit.After;
 import org.junit.Before;
@@ -301,7 +303,7 @@ public class TestCapacityByteArrayOutputStream {
     }
   }
 
-  // ---- Scalar write methods (writeInt, writeLong) ----
+  // ---- Bulk write methods (writeInt, writeLong, writeInts, writeLongs, writeFloats, writeDoubles) ----
 
   /**
    * Reads a little-endian int from the byte array at position {@code pos}.
@@ -356,6 +358,222 @@ public class TestCapacityByteArrayOutputStream {
       for (int i = 0; i < values.length; i++) {
         assertEquals("value at index " + i, values[i], readLongLE(bytes, i * 8));
       }
+    }
+  }
+
+  @Test
+  public void testWriteInts() throws Throwable {
+    try (CapacityByteArrayOutputStream cbaos = newCapacityBAOS(16)) {
+      int[] values = {10, 20, 30, 40, 50, 60, 70, 80};
+      cbaos.writeInts(values, 0, values.length);
+      assertEquals(values.length * 4, cbaos.size());
+
+      byte[] bytes = BytesInput.from(cbaos).toByteArray();
+      for (int i = 0; i < values.length; i++) {
+        assertEquals("value at index " + i, values[i], readIntLE(bytes, i * 4));
+      }
+    }
+  }
+
+  @Test
+  public void testWriteIntsWithOffset() throws Throwable {
+    try (CapacityByteArrayOutputStream cbaos = newCapacityBAOS(10)) {
+      int[] values = {-1, -1, 100, 200, 300, -1, -1};
+      cbaos.writeInts(values, 2, 3); // write [100, 200, 300]
+      assertEquals(3 * 4, cbaos.size());
+
+      byte[] bytes = BytesInput.from(cbaos).toByteArray();
+      assertEquals(100, readIntLE(bytes, 0));
+      assertEquals(200, readIntLE(bytes, 4));
+      assertEquals(300, readIntLE(bytes, 8));
+    }
+  }
+
+  @Test
+  public void testWriteIntsCrossSlabBoundary() throws Throwable {
+    // Initial slab is 10 bytes; 3 ints = 12 bytes, forcing a slab split
+    try (CapacityByteArrayOutputStream cbaos = newCapacityBAOS(10)) {
+      int[] values = {111, 222, 333};
+      cbaos.writeInts(values, 0, values.length);
+      assertEquals(12, cbaos.size());
+
+      byte[] bytes = BytesInput.from(cbaos).toByteArray();
+      for (int i = 0; i < values.length; i++) {
+        assertEquals("value at index " + i, values[i], readIntLE(bytes, i * 4));
+      }
+    }
+  }
+
+  @Test
+  public void testWriteLongs() throws Throwable {
+    try (CapacityByteArrayOutputStream cbaos = newCapacityBAOS(32)) {
+      long[] values = {100L, 200L, 300L, 400L};
+      cbaos.writeLongs(values, 0, values.length);
+      assertEquals(values.length * 8, cbaos.size());
+
+      byte[] bytes = BytesInput.from(cbaos).toByteArray();
+      for (int i = 0; i < values.length; i++) {
+        assertEquals("value at index " + i, values[i], readLongLE(bytes, i * 8));
+      }
+    }
+  }
+
+  @Test
+  public void testWriteLongsWithOffset() throws Throwable {
+    try (CapacityByteArrayOutputStream cbaos = newCapacityBAOS(32)) {
+      long[] values = {-1L, 10L, 20L, 30L, -1L};
+      cbaos.writeLongs(values, 1, 3); // write [10, 20, 30]
+      assertEquals(3 * 8, cbaos.size());
+
+      byte[] bytes = BytesInput.from(cbaos).toByteArray();
+      assertEquals(10L, readLongLE(bytes, 0));
+      assertEquals(20L, readLongLE(bytes, 8));
+      assertEquals(30L, readLongLE(bytes, 16));
+    }
+  }
+
+  @Test
+  public void testWriteLongsCrossSlabBoundary() throws Throwable {
+    // Initial slab is 10 bytes; 2 longs = 16 bytes
+    try (CapacityByteArrayOutputStream cbaos = newCapacityBAOS(10)) {
+      long[] values = {Long.MIN_VALUE, Long.MAX_VALUE};
+      cbaos.writeLongs(values, 0, values.length);
+      assertEquals(16, cbaos.size());
+
+      byte[] bytes = BytesInput.from(cbaos).toByteArray();
+      assertEquals(Long.MIN_VALUE, readLongLE(bytes, 0));
+      assertEquals(Long.MAX_VALUE, readLongLE(bytes, 8));
+    }
+  }
+
+  @Test
+  public void testWriteFloats() throws Throwable {
+    try (CapacityByteArrayOutputStream cbaos = newCapacityBAOS(32)) {
+      float[] values = {1.0f, 2.5f, -3.5f, 0.0f, Float.NaN, Float.MAX_VALUE};
+      cbaos.writeFloats(values, 0, values.length);
+      assertEquals(values.length * 4, cbaos.size());
+
+      byte[] bytes = BytesInput.from(cbaos).toByteArray();
+      ByteBuffer bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+      for (int i = 0; i < values.length; i++) {
+        assertEquals("value at index " + i,
+            Float.floatToIntBits(values[i]),
+            Float.floatToIntBits(bb.getFloat(i * 4)));
+      }
+    }
+  }
+
+  @Test
+  public void testWriteFloatsCrossSlabBoundary() throws Throwable {
+    try (CapacityByteArrayOutputStream cbaos = newCapacityBAOS(10)) {
+      float[] values = {1.0f, 2.0f, 3.0f, 4.0f};
+      cbaos.writeFloats(values, 0, values.length);
+      assertEquals(16, cbaos.size());
+
+      byte[] bytes = BytesInput.from(cbaos).toByteArray();
+      ByteBuffer bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+      for (int i = 0; i < values.length; i++) {
+        assertEquals("value at index " + i,
+            Float.floatToIntBits(values[i]),
+            Float.floatToIntBits(bb.getFloat(i * 4)));
+      }
+    }
+  }
+
+  @Test
+  public void testWriteDoubles() throws Throwable {
+    try (CapacityByteArrayOutputStream cbaos = newCapacityBAOS(64)) {
+      double[] values = {1.0, 2.5, -3.5, 0.0, Double.NaN, Double.MAX_VALUE};
+      cbaos.writeDoubles(values, 0, values.length);
+      assertEquals(values.length * 8, cbaos.size());
+
+      byte[] bytes = BytesInput.from(cbaos).toByteArray();
+      ByteBuffer bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+      for (int i = 0; i < values.length; i++) {
+        assertEquals("value at index " + i,
+            Double.doubleToLongBits(values[i]),
+            Double.doubleToLongBits(bb.getDouble(i * 8)));
+      }
+    }
+  }
+
+  @Test
+  public void testWriteDoublesCrossSlabBoundary() throws Throwable {
+    try (CapacityByteArrayOutputStream cbaos = newCapacityBAOS(10)) {
+      double[] values = {Math.PI, Math.E, -1.0};
+      cbaos.writeDoubles(values, 0, values.length);
+      assertEquals(24, cbaos.size());
+
+      byte[] bytes = BytesInput.from(cbaos).toByteArray();
+      ByteBuffer bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+      for (int i = 0; i < values.length; i++) {
+        assertEquals("value at index " + i,
+            Double.doubleToLongBits(values[i]),
+            Double.doubleToLongBits(bb.getDouble(i * 8)));
+      }
+    }
+  }
+
+  @Test
+  public void testMixedScalarAndBulkWrites() throws Throwable {
+    try (CapacityByteArrayOutputStream cbaos = newCapacityBAOS(16)) {
+      // Write: 1 int scalar, 2 ints bulk, 1 long scalar, 2 longs bulk
+      cbaos.writeInt(42);
+      int[] ints = {100, 200};
+      cbaos.writeInts(ints, 0, ints.length);
+      cbaos.writeLong(999L);
+      long[] longs = {10000L, 20000L};
+      cbaos.writeLongs(longs, 0, longs.length);
+
+      int expectedSize = 4 + 8 + 8 + 16; // 36 bytes
+      assertEquals(expectedSize, cbaos.size());
+
+      byte[] bytes = BytesInput.from(cbaos).toByteArray();
+      assertEquals(42, readIntLE(bytes, 0));
+      assertEquals(100, readIntLE(bytes, 4));
+      assertEquals(200, readIntLE(bytes, 8));
+      assertEquals(999L, readLongLE(bytes, 12));
+      assertEquals(10000L, readLongLE(bytes, 20));
+      assertEquals(20000L, readLongLE(bytes, 28));
+    }
+  }
+
+  @Test
+  public void testBulkWriteLargeArray() throws Throwable {
+    // Write 1000 ints with a small initial slab to exercise multiple slab allocations
+    try (CapacityByteArrayOutputStream cbaos = newCapacityBAOS(16)) {
+      int count = 1000;
+      int[] values = new int[count];
+      for (int i = 0; i < count; i++) {
+        values[i] = i * 7 - 3000;
+      }
+      cbaos.writeInts(values, 0, count);
+      assertEquals(count * 4, cbaos.size());
+
+      byte[] bytes = BytesInput.from(cbaos).toByteArray();
+      for (int i = 0; i < count; i++) {
+        assertEquals("value at index " + i, values[i], readIntLE(bytes, i * 4));
+      }
+    }
+  }
+
+  @Test
+  public void testBulkWriteAfterReset() throws Throwable {
+    try (CapacityByteArrayOutputStream cbaos = newCapacityBAOS(10)) {
+      int[] first = {1, 2, 3};
+      cbaos.writeInts(first, 0, first.length);
+      assertEquals(12, cbaos.size());
+
+      cbaos.reset();
+      assertEquals(0, cbaos.size());
+
+      int[] second = {10, 20};
+      cbaos.writeInts(second, 0, second.length);
+      assertEquals(8, cbaos.size());
+
+      byte[] bytes = BytesInput.from(cbaos).toByteArray();
+      assertEquals(10, readIntLE(bytes, 0));
+      assertEquals(20, readIntLE(bytes, 4));
     }
   }
 }

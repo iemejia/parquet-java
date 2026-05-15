@@ -35,7 +35,7 @@ import org.junit.Test;
 
 /**
  * Tests for {@link FixedLenByteArrayPlainValuesWriter} and
- * {@link FixedLenByteArrayPlainValuesReader} covering scalar
+ * {@link FixedLenByteArrayPlainValuesReader} covering scalar and batch
  * round-trips for fixed-length byte arrays.
  */
 public class TestFixedLenByteArrayPlainValuesWriterReader {
@@ -100,6 +100,97 @@ public class TestFixedLenByteArrayPlainValuesWriterReader {
     }
   }
 
+  // ---- Batch write, scalar read ----
+
+  @Test
+  public void testBatchWriteScalarRead() throws IOException {
+    try (FixedLenByteArrayPlainValuesWriter writer = newWriter()) {
+      Binary[] values = {fixedBinary(10), fixedBinary(20), fixedBinary(30)};
+      writer.writeBinaries(values, 0, values.length);
+
+      FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(FIXED_LEN);
+      reader.initFromPage(values.length, wrapForReading(writer));
+
+      for (Binary v : values) {
+        assertArrayEquals(v.getBytes(), reader.readBytes().getBytes());
+      }
+    }
+  }
+
+  // ---- Scalar write, batch read ----
+
+  @Test
+  public void testScalarWriteBatchRead() throws IOException {
+    try (FixedLenByteArrayPlainValuesWriter writer = newWriter()) {
+      Binary[] expected = {fixedBinary(1), fixedBinary(2), fixedBinary(3), fixedBinary(4)};
+      for (Binary v : expected) {
+        writer.writeBytes(v);
+      }
+
+      FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(FIXED_LEN);
+      reader.initFromPage(expected.length, wrapForReading(writer));
+
+      Binary[] actual = new Binary[expected.length];
+      reader.readBinaries(actual, 0, expected.length);
+      for (int i = 0; i < expected.length; i++) {
+        assertArrayEquals("value at index " + i, expected[i].getBytes(), actual[i].getBytes());
+      }
+    }
+  }
+
+  // ---- Batch round-trip ----
+
+  @Test
+  public void testBatchRoundTrip() throws IOException {
+    try (FixedLenByteArrayPlainValuesWriter writer = newWriter()) {
+      Binary[] expected = {fixedBinary(50), fixedBinary(60), fixedBinary(70), fixedBinary(80), fixedBinary(90)};
+      writer.writeBinaries(expected, 0, expected.length);
+
+      FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(FIXED_LEN);
+      reader.initFromPage(expected.length, wrapForReading(writer));
+
+      Binary[] actual = new Binary[expected.length];
+      reader.readBinaries(actual, 0, expected.length);
+      for (int i = 0; i < expected.length; i++) {
+        assertArrayEquals("value at index " + i, expected[i].getBytes(), actual[i].getBytes());
+      }
+    }
+  }
+
+  // ---- Batch with offset ----
+
+  @Test
+  public void testBatchWriteWithOffset() throws IOException {
+    try (FixedLenByteArrayPlainValuesWriter writer = newWriter()) {
+      Binary[] source = {fixedBinary(0), fixedBinary(1), fixedBinary(2), fixedBinary(3), fixedBinary(4)};
+      writer.writeBinaries(source, 1, 3); // write [1, 2, 3]
+
+      FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(FIXED_LEN);
+      reader.initFromPage(3, wrapForReading(writer));
+
+      assertArrayEquals(fixedBinary(1).getBytes(), reader.readBytes().getBytes());
+      assertArrayEquals(fixedBinary(2).getBytes(), reader.readBytes().getBytes());
+      assertArrayEquals(fixedBinary(3).getBytes(), reader.readBytes().getBytes());
+    }
+  }
+
+  @Test
+  public void testBatchReadWithOffset() throws IOException {
+    try (FixedLenByteArrayPlainValuesWriter writer = newWriter()) {
+      Binary[] values = {fixedBinary(10), fixedBinary(20), fixedBinary(30)};
+      writer.writeBinaries(values, 0, values.length);
+
+      FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(FIXED_LEN);
+      reader.initFromPage(values.length, wrapForReading(writer));
+
+      Binary[] dest = new Binary[5];
+      reader.readBinaries(dest, 1, 3);
+      assertArrayEquals(fixedBinary(10).getBytes(), dest[1].getBytes());
+      assertArrayEquals(fixedBinary(20).getBytes(), dest[2].getBytes());
+      assertArrayEquals(fixedBinary(30).getBytes(), dest[3].getBytes());
+    }
+  }
+
   // ---- Skip ----
 
   @Test
@@ -120,6 +211,25 @@ public class TestFixedLenByteArrayPlainValuesWriterReader {
     }
   }
 
+  // ---- Skip then batch read ----
+
+  @Test
+  public void testSkipThenBatchRead() throws IOException {
+    try (FixedLenByteArrayPlainValuesWriter writer = newWriter()) {
+      Binary[] values = {fixedBinary(10), fixedBinary(20), fixedBinary(30), fixedBinary(40)};
+      writer.writeBinaries(values, 0, values.length);
+
+      FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(FIXED_LEN);
+      reader.initFromPage(values.length, wrapForReading(writer));
+
+      reader.skip(2); // skip 10, 20
+      Binary[] actual = new Binary[2];
+      reader.readBinaries(actual, 0, 2);
+      assertArrayEquals(fixedBinary(30).getBytes(), actual[0].getBytes());
+      assertArrayEquals(fixedBinary(40).getBytes(), actual[1].getBytes());
+    }
+  }
+
   // ---- Wrong length rejection ----
 
   @Test
@@ -131,6 +241,64 @@ public class TestFixedLenByteArrayPlainValuesWriterReader {
         fail("Should have thrown IllegalArgumentException");
       } catch (IllegalArgumentException e) {
         // expected
+      }
+    }
+  }
+
+  @Test
+  public void testRejectWrongLengthBatch() {
+    try (FixedLenByteArrayPlainValuesWriter writer = newWriter()) {
+      Binary[] values = {fixedBinary(1), Binary.fromConstantByteArray(new byte[FIXED_LEN - 1])};
+      try {
+        writer.writeBinaries(values, 0, values.length);
+        fail("Should have thrown exception for wrong length");
+      } catch (Exception e) {
+        // expected — either IllegalArgumentException or ParquetEncodingException wrapping it
+      }
+    }
+  }
+
+  // ---- Large batch (crosses slab boundaries) ----
+
+  @Test
+  public void testLargeBatchRoundTrip() throws IOException {
+    try (FixedLenByteArrayPlainValuesWriter writer =
+             new FixedLenByteArrayPlainValuesWriter(FIXED_LEN, 64, 64 * 1024, allocator)) {
+      int count = 500;
+      Binary[] expected = new Binary[count];
+      for (int i = 0; i < count; i++) {
+        expected[i] = fixedBinary(i);
+      }
+      writer.writeBinaries(expected, 0, count);
+
+      FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(FIXED_LEN);
+      reader.initFromPage(count, wrapForReading(writer));
+
+      Binary[] actual = new Binary[count];
+      reader.readBinaries(actual, 0, count);
+      for (int i = 0; i < count; i++) {
+        assertArrayEquals("value at index " + i, expected[i].getBytes(), actual[i].getBytes());
+      }
+    }
+  }
+
+  // ---- Mixed scalar + batch ----
+
+  @Test
+  public void testMixedScalarAndBatchWrite() throws IOException {
+    try (FixedLenByteArrayPlainValuesWriter writer = newWriter()) {
+      writer.writeBytes(fixedBinary(1));
+      Binary[] batch = {fixedBinary(2), fixedBinary(3)};
+      writer.writeBinaries(batch, 0, batch.length);
+      writer.writeBytes(fixedBinary(4));
+
+      FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(FIXED_LEN);
+      reader.initFromPage(4, wrapForReading(writer));
+
+      Binary[] actual = new Binary[4];
+      reader.readBinaries(actual, 0, 4);
+      for (int i = 0; i < 4; i++) {
+        assertArrayEquals("value at index " + i, fixedBinary(i + 1).getBytes(), actual[i].getBytes());
       }
     }
   }
@@ -161,6 +329,35 @@ public class TestFixedLenByteArrayPlainValuesWriterReader {
       FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(FIXED_LEN);
       reader.initFromPage(0, wrapForReading(writer));
       // Should not throw
+    }
+  }
+
+  // ---- Small fixed length (e.g. INT96 = 12 bytes, UUID = 16 bytes) ----
+
+  @Test
+  public void testSmallFixedLength() throws IOException {
+    int len = 4;
+    try (FixedLenByteArrayPlainValuesWriter writer =
+             new FixedLenByteArrayPlainValuesWriter(len, 1024, 64 * 1024, allocator)) {
+      Binary[] expected = new Binary[10];
+      for (int i = 0; i < 10; i++) {
+        byte[] data = new byte[len];
+        for (int j = 0; j < len; j++) {
+          data[j] = (byte) (i * len + j);
+        }
+        expected[i] = Binary.fromConstantByteArray(data);
+      }
+      writer.writeBinaries(expected, 0, expected.length);
+
+      byte[] bytes = writer.getBytes().toByteArray();
+      FixedLenByteArrayPlainValuesReader reader = new FixedLenByteArrayPlainValuesReader(len);
+      reader.initFromPage(expected.length, ByteBufferInputStream.wrap(ByteBuffer.wrap(bytes)));
+
+      Binary[] actual = new Binary[expected.length];
+      reader.readBinaries(actual, 0, expected.length);
+      for (int i = 0; i < expected.length; i++) {
+        assertArrayEquals("value at index " + i, expected[i].getBytes(), actual[i].getBytes());
+      }
     }
   }
 }

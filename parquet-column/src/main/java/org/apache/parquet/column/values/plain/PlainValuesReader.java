@@ -67,6 +67,11 @@ public abstract class PlainValuesReader extends ValuesReader {
       return buffer.getDouble();
     }
 
+    @Override
+    public void readDoubles(double[] dest, int offset, int count) {
+      buffer.asDoubleBuffer().get(dest, offset, count);
+      buffer.position(buffer.position() + count * Double.BYTES);
+    }
   }
 
   public static class FloatPlainValuesReader extends PlainValuesReader {
@@ -79,6 +84,12 @@ public abstract class PlainValuesReader extends ValuesReader {
     @Override
     public float readFloat() {
       return buffer.getFloat();
+    }
+
+    @Override
+    public void readFloats(float[] dest, int offset, int count) {
+      buffer.asFloatBuffer().get(dest, offset, count);
+      buffer.position(buffer.position() + count * Float.BYTES);
     }
   }
 
@@ -93,6 +104,12 @@ public abstract class PlainValuesReader extends ValuesReader {
     public int readInteger() {
       return buffer.getInt();
     }
+
+    @Override
+    public void readIntegers(int[] dest, int offset, int count) {
+      buffer.asIntBuffer().get(dest, offset, count);
+      buffer.position(buffer.position() + count * Integer.BYTES);
+    }
   }
 
   public static class LongPlainValuesReader extends PlainValuesReader {
@@ -105,6 +122,12 @@ public abstract class PlainValuesReader extends ValuesReader {
     @Override
     public long readLong() {
       return buffer.getLong();
+    }
+
+    @Override
+    public void readLongs(long[] dest, int offset, int count) {
+      buffer.asLongBuffer().get(dest, offset, count);
+      buffer.position(buffer.position() + count * Long.BYTES);
     }
   }
 }

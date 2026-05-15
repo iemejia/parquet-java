@@ -61,6 +61,20 @@ public class FixedLenByteArrayPlainValuesReader extends ValuesReader {
     buffer.position(buffer.position() + n * length);
   }
 
+  /**
+   * Batch read: creates Binary views at fixed offsets within the ByteBuffer,
+   * advancing the position once for the entire batch — eliminating per-value
+   * position updates.
+   */
+  @Override
+  public void readBinaries(Binary[] dest, int offset, int count) {
+    int basePos = buffer.position();
+    for (int i = 0; i < count; i++) {
+      dest[offset + i] = Binary.fromConstantByteBuffer(buffer, basePos + i * length, length);
+    }
+    buffer.position(basePos + count * length);
+  }
+
   @Override
   public void initFromPage(int valueCount, ByteBufferInputStream stream) throws IOException {
     LOG.debug("init from page at offset {} for length {}", stream.position(), stream.available());
