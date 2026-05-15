@@ -19,6 +19,7 @@
 package org.apache.parquet.column.values.deltalengthbytearray;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.column.values.ValuesReader;
 import org.apache.parquet.column.values.delta.DeltaBinaryPackingValuesReader;
@@ -62,10 +63,17 @@ public class DeltaLengthByteArrayValuesReader extends ValuesReader {
     // Batch-decode all lengths first (hits the delta-packed int buffer in one pass)
     int[] lengths = new int[count];
     lengthReader.readIntegers(lengths, 0, count);
-    // Then slice data for each value
+    // Single slice for the entire data block, then create Binary views at offsets
     try {
+      int totalBytes = 0;
       for (int i = 0; i < count; i++) {
-        dest[offset + i] = Binary.fromConstantByteBuffer(in.slice(lengths[i]));
+        totalBytes += lengths[i];
+      }
+      ByteBuffer block = in.slice(totalBytes);
+      int pos = block.position();
+      for (int i = 0; i < count; i++) {
+        dest[offset + i] = Binary.fromConstantByteBuffer(block, pos, lengths[i]);
+        pos += lengths[i];
       }
     } catch (IOException e) {
       throw new ParquetDecodingException("Failed to read binary data", e);
