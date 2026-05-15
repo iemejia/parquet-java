@@ -84,6 +84,7 @@ public class DeltaByteArrayDecodingBenchmark {
     public String dataPattern;
 
     byte[] encoded;
+    Binary[] dest;
 
     @Setup(Level.Trial)
     public void setup() throws IOException {
@@ -107,6 +108,7 @@ public class DeltaByteArrayDecodingBenchmark {
       }
       encoded = w.getBytes().toByteArray();
       w.close();
+      dest = new Binary[VALUE_COUNT];
     }
   }
 
@@ -125,6 +127,7 @@ public class DeltaByteArrayDecodingBenchmark {
     public String dataPattern;
 
     byte[] encoded;
+    Binary[] dest;
 
     @Setup(Level.Trial)
     public void setup() throws IOException {
@@ -148,6 +151,7 @@ public class DeltaByteArrayDecodingBenchmark {
       }
       encoded = w.getBytes().toByteArray();
       w.close();
+      dest = new Binary[VALUE_COUNT];
     }
   }
 
@@ -163,6 +167,15 @@ public class DeltaByteArrayDecodingBenchmark {
     }
   }
 
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeBinaryBatch(BinaryState state, Blackhole bh) throws IOException {
+    DeltaByteArrayReader reader = new DeltaByteArrayReader();
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(state.encoded)));
+    reader.readBinaries(state.dest, 0, VALUE_COUNT);
+    bh.consume(state.dest);
+  }
+
   // ---- FIXED_LEN_BYTE_ARRAY ----
 
   @Benchmark
@@ -173,5 +186,14 @@ public class DeltaByteArrayDecodingBenchmark {
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(reader.readBytes());
     }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeFlbaBatch(FlbaState state, Blackhole bh) throws IOException {
+    DeltaByteArrayReader reader = new DeltaByteArrayReader();
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(state.encoded)));
+    reader.readBinaries(state.dest, 0, VALUE_COUNT);
+    bh.consume(state.dest);
   }
 }

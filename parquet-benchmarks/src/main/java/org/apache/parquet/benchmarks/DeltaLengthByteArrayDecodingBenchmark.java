@@ -72,6 +72,7 @@ public class DeltaLengthByteArrayDecodingBenchmark {
   public String dataPattern;
 
   private byte[] encoded;
+  private Binary[] dest;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
@@ -94,6 +95,7 @@ public class DeltaLengthByteArrayDecodingBenchmark {
     }
     encoded = w.getBytes().toByteArray();
     w.close();
+    dest = new Binary[VALUE_COUNT];
   }
 
   @Benchmark
@@ -104,5 +106,14 @@ public class DeltaLengthByteArrayDecodingBenchmark {
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(reader.readBytes());
     }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeBatch(Blackhole bh) throws IOException {
+    DeltaLengthByteArrayValuesReader reader = new DeltaLengthByteArrayValuesReader();
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(encoded)));
+    reader.readBinaries(dest, 0, VALUE_COUNT);
+    bh.consume(dest);
   }
 }

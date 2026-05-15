@@ -176,6 +176,7 @@ public class PlainDecodingBenchmark {
     public int stringLength;
 
     byte[] page;
+    Binary[] dest;
 
     @Setup(Level.Trial)
     public void setup() throws IOException {
@@ -187,6 +188,7 @@ public class PlainDecodingBenchmark {
       }
       page = w.getBytes().toByteArray();
       w.close();
+      dest = new Binary[VALUE_COUNT];
     }
   }
 
@@ -337,6 +339,15 @@ public class PlainDecodingBenchmark {
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(reader.readBytes());
     }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeBinaryBatch(BinaryState state, Blackhole bh) throws IOException {
+    BinaryPlainValuesReader reader = new BinaryPlainValuesReader();
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(state.page)));
+    reader.readBinaries(state.dest, 0, VALUE_COUNT);
+    bh.consume(state.dest);
   }
 
   // ---- FIXED_LEN_BYTE_ARRAY (parameterized by fixed length) ----

@@ -316,6 +316,7 @@ public class DictionaryDecodingBenchmark {
     byte[] dictData;
     Dictionary dictionary;
     boolean dictAvailable;
+    Binary[] dest;
 
     @Setup(Level.Trial)
     public void setup() throws IOException {
@@ -338,6 +339,7 @@ public class DictionaryDecodingBenchmark {
       if (dictAvailable) {
         dictionary = new PlainValuesDictionary.PlainBinaryDictionary(enc.dictPage);
       }
+      dest = new Binary[VALUE_COUNT];
     }
   }
 
@@ -350,6 +352,16 @@ public class DictionaryDecodingBenchmark {
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(r.readBytes());
     }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeBinaryBatch(BinaryState state, Blackhole bh) throws IOException {
+    if (!state.dictAvailable) return;
+    DictionaryValuesReader r = new DictionaryValuesReader(state.dictionary);
+    r.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(state.dictData)));
+    r.readBinaries(state.dest, 0, VALUE_COUNT);
+    bh.consume(state.dest);
   }
 
   // ==== FIXED_LEN_BYTE_ARRAY (parameterised by fixedLength and cardinality) ====
@@ -365,6 +377,7 @@ public class DictionaryDecodingBenchmark {
     byte[] dictData;
     Dictionary dictionary;
     boolean dictAvailable;
+    Binary[] dest;
 
     @Setup(Level.Trial)
     public void setup() throws IOException {
@@ -388,6 +401,7 @@ public class DictionaryDecodingBenchmark {
       if (dictAvailable) {
         dictionary = new PlainValuesDictionary.PlainBinaryDictionary(enc.dictPage, fixedLength);
       }
+      dest = new Binary[VALUE_COUNT];
     }
   }
 
@@ -400,5 +414,15 @@ public class DictionaryDecodingBenchmark {
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(r.readBytes());
     }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeFlbaBatch(FlbaState state, Blackhole bh) throws IOException {
+    if (!state.dictAvailable) return;
+    DictionaryValuesReader r = new DictionaryValuesReader(state.dictionary);
+    r.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(state.dictData)));
+    r.readBinaries(state.dest, 0, VALUE_COUNT);
+    bh.consume(state.dest);
   }
 }
