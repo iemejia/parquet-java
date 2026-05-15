@@ -64,6 +64,32 @@ public class TestDeltaByteArray {
   }
 
   @Test
+  public void testBatchSerialization() throws Exception {
+    DeltaByteArrayWriter writer = new DeltaByteArrayWriter(64 * 1024, 64 * 1024, new DirectByteBufferAllocator());
+    DeltaByteArrayReader reader = new DeltaByteArrayReader();
+
+    Utils.writeData(writer, values);
+    Binary[] bin = Utils.readDataBatch(reader, writer.getBytes().toInputStream(), values.length);
+
+    for (int i = 0; i < bin.length; i++) {
+      Assert.assertEquals(Binary.fromString(values[i]), bin[i]);
+    }
+  }
+
+  @Test
+  public void testBatchRandomStrings() throws Exception {
+    DeltaByteArrayWriter writer = new DeltaByteArrayWriter(64 * 1024, 64 * 1024, new DirectByteBufferAllocator());
+    DeltaByteArrayReader reader = new DeltaByteArrayReader();
+
+    Utils.writeData(writer, randvalues);
+    Binary[] bin = Utils.readDataBatch(reader, writer.getBytes().toInputStream(), randvalues.length);
+
+    for (int i = 0; i < bin.length; i++) {
+      Assert.assertEquals(Binary.fromString(randvalues[i]), bin[i]);
+    }
+  }
+
+  @Test
   public void testLengths() throws IOException {
     DeltaByteArrayWriter writer = new DeltaByteArrayWriter(64 * 1024, 64 * 1024, new DirectByteBufferAllocator());
     ValuesReader reader = new DeltaBinaryPackingValuesReader();

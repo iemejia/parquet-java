@@ -42,6 +42,18 @@ public class BinaryPlainValuesReader extends ValuesReader {
   }
 
   @Override
+  public void readBinaries(Binary[] dest, int offset, int count) {
+    try {
+      for (int i = 0; i < count; i++) {
+        int length = BytesUtils.readIntLittleEndian(in);
+        dest[offset + i] = Binary.fromConstantByteBuffer(in.slice(length));
+      }
+    } catch (IOException | RuntimeException e) {
+      throw new ParquetDecodingException("could not read bytes at offset " + in.position(), e);
+    }
+  }
+
+  @Override
   public void skip() {
     try {
       int length = BytesUtils.readIntLittleEndian(in);

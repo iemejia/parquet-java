@@ -87,6 +87,33 @@ public class TestDeltaLengthByteArray {
   }
 
   @Test
+  public void testBatchSerialization() throws IOException {
+    DeltaLengthByteArrayValuesWriter writer = getDeltaLengthByteArrayValuesWriter();
+    DeltaLengthByteArrayValuesReader reader = new DeltaLengthByteArrayValuesReader();
+
+    Utils.writeData(writer, values);
+    Binary[] bin = Utils.readDataBatch(reader, writer.getBytes().toInputStream(), values.length);
+
+    for (int i = 0; i < bin.length; i++) {
+      Assert.assertEquals(Binary.fromString(values[i]), bin[i]);
+    }
+  }
+
+  @Test
+  public void testBatchRandomStrings() throws IOException {
+    DeltaLengthByteArrayValuesWriter writer = getDeltaLengthByteArrayValuesWriter();
+    DeltaLengthByteArrayValuesReader reader = new DeltaLengthByteArrayValuesReader();
+
+    String[] values = Utils.getRandomStringSamples(1000, 32);
+    Utils.writeData(writer, values);
+    Binary[] bin = Utils.readDataBatch(reader, writer.getBytes().toInputStream(), values.length);
+
+    for (int i = 0; i < bin.length; i++) {
+      Assert.assertEquals(Binary.fromString(values[i]), bin[i]);
+    }
+  }
+
+  @Test
   public void testLengths() throws IOException {
     DeltaLengthByteArrayValuesWriter writer = getDeltaLengthByteArrayValuesWriter();
     ValuesReader reader = new DeltaBinaryPackingValuesReader();

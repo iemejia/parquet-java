@@ -58,6 +58,21 @@ public class DeltaLengthByteArrayValuesReader extends ValuesReader {
   }
 
   @Override
+  public void readBinaries(Binary[] dest, int offset, int count) {
+    // Batch-decode all lengths first (hits the delta-packed int buffer in one pass)
+    int[] lengths = new int[count];
+    lengthReader.readIntegers(lengths, 0, count);
+    // Then slice data for each value
+    try {
+      for (int i = 0; i < count; i++) {
+        dest[offset + i] = Binary.fromConstantByteBuffer(in.slice(lengths[i]));
+      }
+    } catch (IOException e) {
+      throw new ParquetDecodingException("Failed to read binary data", e);
+    }
+  }
+
+  @Override
   public void skip() {
     skip(1);
   }

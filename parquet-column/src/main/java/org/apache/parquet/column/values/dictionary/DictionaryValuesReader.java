@@ -171,6 +171,20 @@ public class DictionaryValuesReader extends ValuesReader {
   }
 
   @Override
+  public void readBinaries(Binary[] dest, int offset, int count) {
+    try {
+      // Batch-decode dictionary IDs, then batch-lookup
+      int[] ids = new int[count];
+      decoder.readInts(ids, 0, count);
+      for (int i = 0; i < count; i++) {
+        dest[offset + i] = dictionary.decodeToBinary(ids[i]);
+      }
+    } catch (IOException e) {
+      throw new ParquetDecodingException(e);
+    }
+  }
+
+  @Override
   public void skip() {
     try {
       decoder.readInt(); // Type does not matter as we are just skipping dictionary keys
