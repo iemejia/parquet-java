@@ -163,4 +163,16 @@ public class ByteStreamSplitEncodingBenchmark {
     w.close();
     return bytes;
   }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeFlbaBatch(FlbaState state) throws IOException {
+    ByteStreamSplitValuesWriter.FixedLenByteArrayByteStreamSplitValuesWriter w =
+        new ByteStreamSplitValuesWriter.FixedLenByteArrayByteStreamSplitValuesWriter(
+            state.fixedLength, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    w.writeBinaries(state.data, 0, VALUE_COUNT);
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
 }
