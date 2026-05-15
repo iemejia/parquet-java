@@ -298,6 +298,123 @@ public class TestRunLengthBitPackingHybridEncoder {
     assertEquals(stream.available(), 0);
   }
 
+  // ---- writeInts batch tests ----
+
+  /**
+   * Verifies that writeInts produces the same encoded output as writing
+   * the same values one-by-one via writeInt.
+   */
+  private void assertBatchEqualsScalar(int bitWidth, int[] values) throws Exception {
+    RunLengthBitPackingHybridEncoder scalar = getRunLengthBitPackingHybridEncoder(bitWidth, 100, 64000);
+    for (int v : values) {
+      scalar.writeInt(v);
+    }
+    byte[] scalarBytes = scalar.toBytes().toByteArray();
+
+    RunLengthBitPackingHybridEncoder batch = getRunLengthBitPackingHybridEncoder(bitWidth, 100, 64000);
+    batch.writeInts(values, 0, values.length);
+    byte[] batchBytes = batch.toBytes().toByteArray();
+
+    // Both must decode to the same values
+    RunLengthBitPackingHybridDecoder scalarDec =
+        new RunLengthBitPackingHybridDecoder(bitWidth, new ByteArrayInputStream(scalarBytes));
+    RunLengthBitPackingHybridDecoder batchDec =
+        new RunLengthBitPackingHybridDecoder(bitWidth, new ByteArrayInputStream(batchBytes));
+
+    for (int i = 0; i < values.length; i++) {
+      assertEquals("mismatch at index " + i, scalarDec.readInt(), batchDec.readInt());
+    }
+  }
+
+  @Test
+  public void testWriteIntsRleOnly() throws Exception {
+    // 100 repeated 4s, then 100 repeated 5s
+    int[] values = new int[200];
+    for (int i = 0; i < 100; i++) values[i] = 4;
+    for (int i = 100; i < 200; i++) values[i] = 5;
+    assertBatchEqualsScalar(3, values);
+  }
+
+  @Test
+  public void testWriteIntsBitPackingOnly() throws Exception {
+    // Alternating values -- pure bit-packing
+    int[] values = new int[100];
+    for (int i = 0; i < 100; i++) values[i] = i % 3;
+    assertBatchEqualsScalar(3, values);
+  }
+
+  @Test
+  public void testWriteIntsMixed() throws Exception {
+    // Matches testSwitchingModes: RLE, then bit-packed, then RLE, then RLE
+    int[] values = new int[65];
+    int idx = 0;
+    for (int i = 0; i < 25; i++) values[idx++] = 17;
+    for (int i = 0; i < 7; i++) values[idx++] = 7;
+    values[idx++] = 8;
+    values[idx++] = 9;
+    values[idx++] = 10;
+    for (int i = 0; i < 25; i++) values[idx++] = 6;
+    assertBatchEqualsScalar(9, values);
+  }
+
+  @Test
+  public void testWriteIntsOverflow() throws Exception {
+    // > 504 values to trigger bit-pack overflow boundary
+    int[] values = new int[1000];
+    for (int i = 0; i < 1000; i++) values[i] = i % 3;
+    assertBatchEqualsScalar(3, values);
+  }
+
+  @Test
+  public void testWriteIntsTailValues() throws Exception {
+    // 9 values -- exercises the unfinished bit-packed run padding
+    int[] values = new int[9];
+    for (int i = 0; i < 9; i++) values[i] = i + 1;
+    assertBatchEqualsScalar(5, values);
+  }
+
+  @Test
+  public void testWriteIntsRepeatedZeros() throws Exception {
+    int[] values = new int[10]; // all zeros
+    assertBatchEqualsScalar(3, values);
+  }
+
+  @Test
+  public void testWriteIntsWithOffset() throws Exception {
+    // Use offset and length to encode a subset
+    int[] values = {99, 99, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 99, 99};
+    RunLengthBitPackingHybridEncoder encoder = getRunLengthBitPackingHybridEncoder(3, 100, 64000);
+    encoder.writeInts(values, 2, 20);
+    byte[] encoded = encoder.toBytes().toByteArray();
+
+    RunLengthBitPackingHybridDecoder decoder =
+        new RunLengthBitPackingHybridDecoder(3, new ByteArrayInputStream(encoded));
+    for (int i = 0; i < 10; i++) assertEquals(4, decoder.readInt());
+    for (int i = 0; i < 10; i++) assertEquals(5, decoder.readInt());
+  }
+
+  @Test
+  public void testWriteIntsIntegration() throws Exception {
+    // Mirror the integration test: all bit widths from 0 to 32
+    for (int bitWidth = 0; bitWidth <= 32; bitWidth++) {
+      long modValue = 1L << bitWidth;
+
+      List<Integer> valuesList = new ArrayList<>();
+      for (int i = 0; i < 100; i++) valuesList.add((int) (i % modValue));
+      for (int i = 0; i < 100; i++) valuesList.add((int) (77 % modValue));
+      for (int i = 0; i < 100; i++) valuesList.add((int) (88 % modValue));
+      for (int i = 0; i < 1000; i++) {
+        valuesList.add((int) (i % modValue));
+        valuesList.add((int) (i % modValue));
+        valuesList.add((int) (i % modValue));
+      }
+      for (int i = 0; i < 1000; i++) valuesList.add((int) (17 % modValue));
+
+      int[] values = valuesList.stream().mapToInt(Integer::intValue).toArray();
+      assertBatchEqualsScalar(bitWidth, values);
+    }
+  }
+
   private static List<Integer> unpack(int bitWidth, int numValues, ByteArrayInputStream is) throws Exception {
 
     BytePacker packer = Packer.LITTLE_ENDIAN.newBytePacker(bitWidth);

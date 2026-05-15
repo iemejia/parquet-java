@@ -122,6 +122,18 @@ public class DictionaryEncodingBenchmark {
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
+  public void encodeIntBatch(NumericState state, Blackhole bh) throws IOException {
+    DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter w =
+        new DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter(
+            MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+    w.writeIntegers(state.intData, 0, VALUE_COUNT);
+    BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
+    bh.consume(enc.dictData);
+    bh.consume(enc.dictPage);
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
   public void encodeLong(NumericState state, Blackhole bh) throws IOException {
     DictionaryValuesWriter.PlainLongDictionaryValuesWriter w =
         new DictionaryValuesWriter.PlainLongDictionaryValuesWriter(
@@ -129,6 +141,18 @@ public class DictionaryEncodingBenchmark {
     for (long v : state.longData) {
       w.writeLong(v);
     }
+    BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
+    bh.consume(enc.dictData);
+    bh.consume(enc.dictPage);
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void encodeLongBatch(NumericState state, Blackhole bh) throws IOException {
+    DictionaryValuesWriter.PlainLongDictionaryValuesWriter w =
+        new DictionaryValuesWriter.PlainLongDictionaryValuesWriter(
+            MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+    w.writeLongs(state.longData, 0, VALUE_COUNT);
     BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
     bh.consume(enc.dictData);
     bh.consume(enc.dictPage);
@@ -150,6 +174,18 @@ public class DictionaryEncodingBenchmark {
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
+  public void encodeFloatBatch(NumericState state, Blackhole bh) throws IOException {
+    DictionaryValuesWriter.PlainFloatDictionaryValuesWriter w =
+        new DictionaryValuesWriter.PlainFloatDictionaryValuesWriter(
+            MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+    w.writeFloats(state.floatData, 0, VALUE_COUNT);
+    BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
+    bh.consume(enc.dictData);
+    bh.consume(enc.dictPage);
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
   public void encodeDouble(NumericState state, Blackhole bh) throws IOException {
     DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter w =
         new DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter(
@@ -157,6 +193,18 @@ public class DictionaryEncodingBenchmark {
     for (double v : state.doubleData) {
       w.writeDouble(v);
     }
+    BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
+    bh.consume(enc.dictData);
+    bh.consume(enc.dictPage);
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void encodeDoubleBatch(NumericState state, Blackhole bh) throws IOException {
+    DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter w =
+        new DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter(
+            MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+    w.writeDoubles(state.doubleData, 0, VALUE_COUNT);
     BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
     bh.consume(enc.dictData);
     bh.consume(enc.dictPage);
@@ -196,6 +244,18 @@ public class DictionaryEncodingBenchmark {
     bh.consume(enc.dictPage);
   }
 
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void encodeBinaryBatch(BinaryState state, Blackhole bh) throws IOException {
+    DictionaryValuesWriter.PlainBinaryDictionaryValuesWriter w =
+        new DictionaryValuesWriter.PlainBinaryDictionaryValuesWriter(
+            MAX_DICT_BYTE_SIZE, Encoding.PLAIN_DICTIONARY, Encoding.PLAIN, new HeapByteBufferAllocator());
+    w.writeBinaries(state.data, 0, VALUE_COUNT);
+    BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
+    bh.consume(enc.dictData);
+    bh.consume(enc.dictPage);
+  }
+
   // ==== FIXED_LEN_BYTE_ARRAY (parameterised by fixedLength and cardinality) ====
 
   @State(Scope.Thread)
@@ -229,6 +289,22 @@ public class DictionaryEncodingBenchmark {
     for (Binary v : state.data) {
       w.writeBytes(v);
     }
+    BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
+    bh.consume(enc.dictData);
+    bh.consume(enc.dictPage);
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void encodeFlbaBatch(FlbaState state, Blackhole bh) throws IOException {
+    DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter w =
+        new DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter(
+            MAX_DICT_BYTE_SIZE,
+            state.fixedLength,
+            Encoding.PLAIN_DICTIONARY,
+            Encoding.PLAIN,
+            new HeapByteBufferAllocator());
+    w.writeBinaries(state.data, 0, VALUE_COUNT);
     BenchmarkEncodingUtils.EncodedDictionary enc = BenchmarkEncodingUtils.drainDictionary(w);
     bh.consume(enc.dictData);
     bh.consume(enc.dictPage);

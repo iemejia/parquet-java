@@ -138,6 +138,16 @@ public class RleDictionaryIndexDecodingBenchmark {
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeDictionaryIdsBatch() throws IOException {
+    try (RunLengthBitPackingHybridEncoder encoder = new RunLengthBitPackingHybridEncoder(
+        BIT_WIDTH, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator())) {
+      encoder.writeInts(ids, 0, VALUE_COUNT);
+      return encoder.toBytes().toByteArray();
+    }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
   public void decodeDictionaryIds(Blackhole bh) throws IOException {
     RunLengthBitPackingHybridDecoder decoder =
         new RunLengthBitPackingHybridDecoder(BIT_WIDTH, ByteBufferInputStream.wrap(ByteBuffer.wrap(encoded)));

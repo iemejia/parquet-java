@@ -292,6 +292,16 @@ public class PlainEncodingBenchmark {
     return bytes;
   }
 
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeBinaryBatch(BinaryState state) throws IOException {
+    PlainValuesWriter w = newWriter();
+    w.writeBinaries(state.data, 0, state.data.length);
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
   // ---- FIXED_LEN_BYTE_ARRAY (parameterized by fixed length) ----
 
   @Benchmark
