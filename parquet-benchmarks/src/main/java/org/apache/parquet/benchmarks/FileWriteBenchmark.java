@@ -46,8 +46,15 @@ import org.openjdk.jmh.annotations.Warmup;
  * full Parquet writer path.
  *
  * <p>Writes are sent to a {@link BlackHoleOutputFile} to isolate CPU and encoding cost
- * from filesystem I/O. Parameterized across compression codec, writer version, and
- * dictionary encoding.
+ * from filesystem I/O. Parameterized across compression codec, writer version,
+ * dictionary encoding, row-group block size, and data page size.
+ *
+ * <p>Block size controls how many rows accumulate before a row-group flush (triggering
+ * encoding, compression, and index generation). Page size controls the unit of encoding
+ * and compression within a column chunk. The block/page ratio determines the number of
+ * encoding resets per column chunk and the granularity of column-index entries. Use JMH
+ * {@code -p blockSize=...} and {@code -p pageSize=...} to select specific combinations
+ * and avoid the full cross-product when not needed.
  *
  * <p>{@link Mode#SingleShotTime} is used because each invocation does enough work
  * (a full write of {@value TestDataFactory#DEFAULT_ROW_COUNT} rows) that JIT
@@ -71,6 +78,14 @@ public class FileWriteBenchmark {
   @Param({"true", "false"})
   public String dictionary;
 
+  // Row-group block size in bytes: 128 MB (default), 256 MB (common production), 512 MB (stress)
+  @Param({"134217728", "268435456", "536870912"})
+  public int blockSize;
+
+  // Data page size in bytes: 1 MB (default), 4 MB (reduced overhead), 8 MB (max throughput)
+  @Param({"1048576", "4194304", "8388608"})
+  public int pageSize;
+
   private Group[] rows;
 
   @Setup(Level.Trial)
@@ -87,6 +102,8 @@ public class FileWriteBenchmark {
         .withCompressionCodec(CompressionCodecName.valueOf(codec))
         .withWriterVersion(WriterVersion.valueOf(writerVersion))
         .withDictionaryEncoding(Boolean.parseBoolean(dictionary))
+        .withRowGroupSize(blockSize)
+        .withPageSize(pageSize)
         .build()) {
       for (Group row : rows) {
         writer.write(row);
