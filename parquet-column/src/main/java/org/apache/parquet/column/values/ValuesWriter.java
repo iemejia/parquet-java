@@ -99,6 +99,19 @@ public abstract class ValuesWriter implements AutoCloseable {
   }
 
   /**
+   * Writes a batch of boolean values. Subclasses may override for optimized bulk encoding.
+   *
+   * @param values the boolean array to read from
+   * @param offset the start position in the array
+   * @param length the number of values to write
+   */
+  public void writeBooleans(boolean[] values, int offset, int length) {
+    for (int i = offset; i < offset + length; i++) {
+      writeBoolean(values[i]);
+    }
+  }
+
+  /**
    * @param v the value to encode
    */
   public void writeBytes(Binary v) {
@@ -113,10 +126,36 @@ public abstract class ValuesWriter implements AutoCloseable {
   }
 
   /**
+   * Writes a batch of int values. Subclasses may override for optimized bulk encoding.
+   *
+   * @param values the int array to read from
+   * @param offset the start position in the array
+   * @param length the number of values to write
+   */
+  public void writeIntegers(int[] values, int offset, int length) {
+    for (int i = offset; i < offset + length; i++) {
+      writeInteger(values[i]);
+    }
+  }
+
+  /**
    * @param v the value to encode
    */
   public void writeLong(long v) {
     throw new UnsupportedOperationException(getClass().getName());
+  }
+
+  /**
+   * Writes a batch of long values. Subclasses may override for optimized bulk encoding.
+   *
+   * @param values the long array to read from
+   * @param offset the start position in the array
+   * @param length the number of values to write
+   */
+  public void writeLongs(long[] values, int offset, int length) {
+    for (int i = offset; i < offset + length; i++) {
+      writeLong(values[i]);
+    }
   }
 
   /**
@@ -127,10 +166,36 @@ public abstract class ValuesWriter implements AutoCloseable {
   }
 
   /**
+   * Writes a batch of double values. Subclasses may override for optimized bulk encoding.
+   *
+   * @param values the double array to read from
+   * @param offset the start position in the array
+   * @param length the number of values to write
+   */
+  public void writeDoubles(double[] values, int offset, int length) {
+    for (int i = offset; i < offset + length; i++) {
+      writeDouble(values[i]);
+    }
+  }
+
+  /**
    * @param v the value to encode
    */
   public void writeFloat(float v) {
     throw new UnsupportedOperationException(getClass().getName());
+  }
+
+  /**
+   * Writes a batch of float values. Subclasses may override for optimized bulk encoding.
+   *
+   * @param values the float array to read from
+   * @param offset the start position in the array
+   * @param length the number of values to write
+   */
+  public void writeFloats(float[] values, int offset, int length) {
+    for (int i = offset; i < offset + length; i++) {
+      writeFloat(values[i]);
+    }
   }
 
   public abstract String memUsageString(String prefix);

@@ -18,57 +18,122 @@
  */
 package org.apache.parquet.column.values.plain;
 
-import static org.apache.parquet.column.values.bitpacking.Packer.LITTLE_ENDIAN;
-
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import org.apache.parquet.bytes.ByteBufferInputStream;
+import org.apache.parquet.bytes.BytesUtils;
 import org.apache.parquet.column.values.ValuesReader;
-import org.apache.parquet.column.values.bitpacking.ByteBitPackingValuesReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * encodes boolean for the plain encoding: one bit at a time (0 = false)
+ * Decodes PLAIN-encoded booleans: one bit per value, packed 8 per byte, little-endian
+ * bit order (bit 0 of each byte is the first value).
+ *
+ * <p>Direct bit extraction from the page ByteBuffer avoids the overhead of the generic
+ * bit-packing machinery ({@code ByteBitPackingValuesReader}) and intermediate
+ * {@code int[8]} buffers.
+ *
+ * <p>The batch path uses a static 256-entry lookup table that maps each byte value to
+ * its 8 pre-decoded booleans. This enables {@code System.arraycopy} of 8 booleans per
+ * byte (a single 64-bit memory operation in HotSpot) instead of 8 individual
+ * comparison+store operations.
  */
 public class BooleanPlainValuesReader extends ValuesReader {
   private static final Logger LOG = LoggerFactory.getLogger(BooleanPlainValuesReader.class);
 
-  private ByteBitPackingValuesReader in = new ByteBitPackingValuesReader(1, LITTLE_ENDIAN);
-
   /**
-   * {@inheritDoc}
-   *
-   * @see org.apache.parquet.column.values.ValuesReader#readBoolean()
+   * Lookup table: BYTE_TO_BOOLS[b] contains the 8 boolean values for byte value b,
+   * in little-endian bit order (bit 0 = index 0).
    */
-  @Override
-  public boolean readBoolean() {
-    return in.readInteger() == 0 ? false : true;
+  private static final boolean[][] BYTE_TO_BOOLS = new boolean[256][8];
+
+  static {
+    for (int b = 0; b < 256; b++) {
+      for (int bit = 0; bit < 8; bit++) {
+        BYTE_TO_BOOLS[b][bit] = ((b >>> bit) & 1) != 0;
+      }
+    }
   }
 
-  /**
-   * {@inheritDoc}
-   *
-   * @see org.apache.parquet.column.values.ValuesReader#skip()
-   */
-  @Override
-  public void skip() {
-    in.readInteger();
-  }
+  private byte[] pageData;
+  private int pageOffset;
+  private int bitIndex;
 
-  /**
-   * {@inheritDoc}
-   *
-   * @see org.apache.parquet.column.values.ValuesReader#initFromPage(int, ByteBufferInputStream)
-   */
   @Override
   public void initFromPage(int valueCount, ByteBufferInputStream stream) throws IOException {
     LOG.debug("init from page at offset {} for length {}", stream.position(), stream.available());
-    this.in.initFromPage(valueCount, stream);
+    int effectiveBitLength = valueCount; // bitWidth = 1
+    int length = BytesUtils.paddedByteCountFromBits(effectiveBitLength);
+    length = Math.min(length, stream.available());
+    ByteBuffer buf = stream.slice(length);
+
+    // Bulk access: use backing array directly if available, otherwise copy once.
+    if (buf.hasArray()) {
+      pageData = buf.array();
+      pageOffset = buf.arrayOffset() + buf.position();
+    } else {
+      pageData = new byte[length];
+      buf.get(pageData);
+      pageOffset = 0;
+    }
+    bitIndex = 0;
+    updateNextOffset(length);
   }
 
-  @Deprecated
   @Override
-  public int getNextOffset() {
-    return in.getNextOffset();
+  public boolean readBoolean() {
+    int byteIdx = pageOffset + (bitIndex >>> 3);
+    int bitPos = bitIndex & 7;
+    bitIndex++;
+    return ((pageData[byteIdx] >>> bitPos) & 1) != 0;
+  }
+
+  @Override
+  public void readBooleans(boolean[] dest, int offset, int count) {
+    int i = 0;
+
+    // Handle partial byte at current position
+    int bitPos = bitIndex & 7;
+    if (bitPos != 0) {
+      int byteIdx = pageOffset + (bitIndex >>> 3);
+      byte b = pageData[byteIdx];
+      while (bitPos < 8 && i < count) {
+        dest[offset + i] = ((b >>> bitPos) & 1) != 0;
+        bitPos++;
+        i++;
+      }
+    }
+
+    // Process full bytes: 8 booleans per byte via lookup table + arraycopy
+    int byteIdx = pageOffset + ((bitIndex + i) >>> 3);
+    while (i + 8 <= count) {
+      System.arraycopy(BYTE_TO_BOOLS[pageData[byteIdx] & 0xFF], 0, dest, offset + i, 8);
+      byteIdx++;
+      i += 8;
+    }
+
+    // Handle remaining bits in the last partial byte
+    if (i < count) {
+      byte b = pageData[byteIdx];
+      int bp = 0;
+      while (i < count) {
+        dest[offset + i] = ((b >>> bp) & 1) != 0;
+        bp++;
+        i++;
+      }
+    }
+
+    bitIndex += count;
+  }
+
+  @Override
+  public void skip() {
+    bitIndex++;
+  }
+
+  @Override
+  public void skip(int n) {
+    bitIndex += n;
   }
 }

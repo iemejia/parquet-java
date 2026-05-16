@@ -21,6 +21,7 @@ package org.apache.parquet.column.values.rle;
 import static org.junit.Assert.assertEquals;
 
 import java.io.ByteArrayInputStream;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.parquet.bytes.BytesUtils;
@@ -290,12 +291,239 @@ public class TestRunLengthBitPackingHybridEncoder {
     // bit width 2.
     bytes[0] = (1 << 1) | 1;
     bytes[1] = (1 << 0) | (2 << 2) | (3 << 4);
-    ByteArrayInputStream stream = new ByteArrayInputStream(bytes);
-    RunLengthBitPackingHybridDecoder decoder = new RunLengthBitPackingHybridDecoder(2, stream);
+    ByteBuffer buffer = ByteBuffer.wrap(bytes);
+    RunLengthBitPackingHybridDecoder decoder = new RunLengthBitPackingHybridDecoder(2, buffer);
     assertEquals(decoder.readInt(), 1);
     assertEquals(decoder.readInt(), 2);
     assertEquals(decoder.readInt(), 3);
-    assertEquals(stream.available(), 0);
+    assertEquals(buffer.remaining(), 0);
+  }
+
+  // ---- writeInts batch tests ----
+
+  /**
+   * Verifies that writeInts produces the same encoded output as writing
+   * the same values one-by-one via writeInt.
+   */
+  private void assertBatchEqualsScalar(int bitWidth, int[] values) throws Exception {
+    RunLengthBitPackingHybridEncoder scalar = getRunLengthBitPackingHybridEncoder(bitWidth, 100, 64000);
+    for (int v : values) {
+      scalar.writeInt(v);
+    }
+    byte[] scalarBytes = scalar.toBytes().toByteArray();
+
+    RunLengthBitPackingHybridEncoder batch = getRunLengthBitPackingHybridEncoder(bitWidth, 100, 64000);
+    batch.writeInts(values, 0, values.length);
+    byte[] batchBytes = batch.toBytes().toByteArray();
+
+    // Both must decode to the same values
+    RunLengthBitPackingHybridDecoder scalarDec =
+        new RunLengthBitPackingHybridDecoder(bitWidth, ByteBuffer.wrap(scalarBytes));
+    RunLengthBitPackingHybridDecoder batchDec =
+        new RunLengthBitPackingHybridDecoder(bitWidth, ByteBuffer.wrap(batchBytes));
+
+    for (int i = 0; i < values.length; i++) {
+      assertEquals("mismatch at index " + i, scalarDec.readInt(), batchDec.readInt());
+    }
+  }
+
+  @Test
+  public void testWriteIntsRleOnly() throws Exception {
+    // 100 repeated 4s, then 100 repeated 5s
+    int[] values = new int[200];
+    for (int i = 0; i < 100; i++) values[i] = 4;
+    for (int i = 100; i < 200; i++) values[i] = 5;
+    assertBatchEqualsScalar(3, values);
+  }
+
+  @Test
+  public void testWriteIntsBitPackingOnly() throws Exception {
+    // Alternating values -- pure bit-packing
+    int[] values = new int[100];
+    for (int i = 0; i < 100; i++) values[i] = i % 3;
+    assertBatchEqualsScalar(3, values);
+  }
+
+  @Test
+  public void testWriteIntsMixed() throws Exception {
+    // Matches testSwitchingModes: RLE, then bit-packed, then RLE, then RLE
+    int[] values = new int[65];
+    int idx = 0;
+    for (int i = 0; i < 25; i++) values[idx++] = 17;
+    for (int i = 0; i < 7; i++) values[idx++] = 7;
+    values[idx++] = 8;
+    values[idx++] = 9;
+    values[idx++] = 10;
+    for (int i = 0; i < 25; i++) values[idx++] = 6;
+    assertBatchEqualsScalar(9, values);
+  }
+
+  @Test
+  public void testWriteIntsOverflow() throws Exception {
+    // > 504 values to trigger bit-pack overflow boundary
+    int[] values = new int[1000];
+    for (int i = 0; i < 1000; i++) values[i] = i % 3;
+    assertBatchEqualsScalar(3, values);
+  }
+
+  @Test
+  public void testWriteIntsTailValues() throws Exception {
+    // 9 values -- exercises the unfinished bit-packed run padding
+    int[] values = new int[9];
+    for (int i = 0; i < 9; i++) values[i] = i + 1;
+    assertBatchEqualsScalar(5, values);
+  }
+
+  @Test
+  public void testWriteIntsRepeatedZeros() throws Exception {
+    int[] values = new int[10]; // all zeros
+    assertBatchEqualsScalar(3, values);
+  }
+
+  @Test
+  public void testWriteIntsWithOffset() throws Exception {
+    // Use offset and length to encode a subset
+    int[] values = {99, 99, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 99, 99};
+    RunLengthBitPackingHybridEncoder encoder = getRunLengthBitPackingHybridEncoder(3, 100, 64000);
+    encoder.writeInts(values, 2, 20);
+    byte[] encoded = encoder.toBytes().toByteArray();
+
+    RunLengthBitPackingHybridDecoder decoder =
+        new RunLengthBitPackingHybridDecoder(3, ByteBuffer.wrap(encoded));
+    for (int i = 0; i < 10; i++) assertEquals(4, decoder.readInt());
+    for (int i = 0; i < 10; i++) assertEquals(5, decoder.readInt());
+  }
+
+  @Test
+  public void testWriteIntsIntegration() throws Exception {
+    // Mirror the integration test: all bit widths from 0 to 32
+    for (int bitWidth = 0; bitWidth <= 32; bitWidth++) {
+      long modValue = 1L << bitWidth;
+
+      List<Integer> valuesList = new ArrayList<>();
+      for (int i = 0; i < 100; i++) valuesList.add((int) (i % modValue));
+      for (int i = 0; i < 100; i++) valuesList.add((int) (77 % modValue));
+      for (int i = 0; i < 100; i++) valuesList.add((int) (88 % modValue));
+      for (int i = 0; i < 1000; i++) {
+        valuesList.add((int) (i % modValue));
+        valuesList.add((int) (i % modValue));
+        valuesList.add((int) (i % modValue));
+      }
+      for (int i = 0; i < 1000; i++) valuesList.add((int) (17 % modValue));
+
+      int[] vals = valuesList.stream().mapToInt(Integer::intValue).toArray();
+      assertBatchEqualsScalar(bitWidth, vals);
+    }
+  }
+
+  // ---- writeBooleans / readBooleans batch tests ----
+
+  /**
+   * Verifies that writeBooleans produces the same encoded output as writing
+   * the same values one-by-one via writeInt(v ? 1 : 0), and that
+   * readBooleans round-trips correctly.
+   */
+  private void assertBooleanBatchEqualsScalar(boolean[] values) throws Exception {
+    RunLengthBitPackingHybridEncoder scalar = getRunLengthBitPackingHybridEncoder(1, 100, 64000);
+    for (boolean v : values) {
+      scalar.writeInt(v ? 1 : 0);
+    }
+    byte[] scalarBytes = scalar.toBytes().toByteArray();
+
+    RunLengthBitPackingHybridEncoder batch = getRunLengthBitPackingHybridEncoder(1, 100, 64000);
+    batch.writeBooleans(values, 0, values.length);
+    byte[] batchBytes = batch.toBytes().toByteArray();
+
+    // Both must decode to the same values via readInt
+    RunLengthBitPackingHybridDecoder scalarDec =
+        new RunLengthBitPackingHybridDecoder(1, ByteBuffer.wrap(scalarBytes));
+    RunLengthBitPackingHybridDecoder batchDec =
+        new RunLengthBitPackingHybridDecoder(1, ByteBuffer.wrap(batchBytes));
+    for (int i = 0; i < values.length; i++) {
+      assertEquals("scalar mismatch at index " + i, scalarDec.readInt(), batchDec.readInt());
+    }
+
+    // Also verify readBooleans round-trip
+    RunLengthBitPackingHybridDecoder boolDec =
+        new RunLengthBitPackingHybridDecoder(1, ByteBuffer.wrap(batchBytes));
+    boolean[] decoded = new boolean[values.length];
+    boolDec.readBooleans(decoded, 0, values.length);
+    for (int i = 0; i < values.length; i++) {
+      assertEquals("boolean mismatch at index " + i, values[i], decoded[i]);
+    }
+  }
+
+  @Test
+  public void testWriteBooleansAllTrue() throws Exception {
+    boolean[] values = new boolean[200];
+    java.util.Arrays.fill(values, true);
+    assertBooleanBatchEqualsScalar(values);
+  }
+
+  @Test
+  public void testWriteBooleansAllFalse() throws Exception {
+    boolean[] values = new boolean[200]; // all false by default
+    assertBooleanBatchEqualsScalar(values);
+  }
+
+  @Test
+  public void testWriteBooleansAlternating() throws Exception {
+    boolean[] values = new boolean[200];
+    for (int i = 0; i < 200; i++) values[i] = (i % 2) == 0;
+    assertBooleanBatchEqualsScalar(values);
+  }
+
+  @Test
+  public void testWriteBooleansMixed() throws Exception {
+    // Long run of false, short alternating, long run of true
+    boolean[] values = new boolean[300];
+    // 0-99: false (default)
+    for (int i = 100; i < 110; i++) values[i] = (i % 2) == 0; // alternating
+    for (int i = 110; i < 300; i++) values[i] = true;
+    assertBooleanBatchEqualsScalar(values);
+  }
+
+  @Test
+  public void testWriteBooleansTailValues() throws Exception {
+    // 5 values -- exercises the unfinished bit-packed run padding
+    boolean[] values = {true, false, true, true, false};
+    assertBooleanBatchEqualsScalar(values);
+  }
+
+  @Test
+  public void testWriteBooleansWithOffset() throws Exception {
+    boolean[] values = {true, true, false, false, false, true, true, true, false, false};
+    RunLengthBitPackingHybridEncoder encoder = getRunLengthBitPackingHybridEncoder(1, 100, 64000);
+    encoder.writeBooleans(values, 2, 6); // false, false, false, true, true, true
+    byte[] encoded = encoder.toBytes().toByteArray();
+
+    RunLengthBitPackingHybridDecoder decoder =
+        new RunLengthBitPackingHybridDecoder(1, ByteBuffer.wrap(encoded));
+    boolean[] decoded = new boolean[6];
+    decoder.readBooleans(decoded, 0, 6);
+    for (int i = 0; i < 6; i++) {
+      assertEquals("mismatch at index " + i, values[2 + i], decoded[i]);
+    }
+  }
+
+  @Test
+  public void testReadBooleansFromScalarEncoded() throws Exception {
+    // Encode with scalar writeInt, then decode with batch readBooleans
+    RunLengthBitPackingHybridEncoder encoder = getRunLengthBitPackingHybridEncoder(1, 100, 64000);
+    boolean[] expected = new boolean[100];
+    for (int i = 0; i < 100; i++) {
+      expected[i] = (i % 3) == 0;
+      encoder.writeInt(expected[i] ? 1 : 0);
+    }
+    byte[] encoded = encoder.toBytes().toByteArray();
+
+    RunLengthBitPackingHybridDecoder decoder =
+        new RunLengthBitPackingHybridDecoder(1, ByteBuffer.wrap(encoded));
+    boolean[] decoded = new boolean[100];
+    decoder.readBooleans(decoded, 0, 100);
+    for (int i = 0; i < 100; i++) {
+      assertEquals("mismatch at index " + i, expected[i], decoded[i]);
+    }
   }
 
   private static List<Integer> unpack(int bitWidth, int numValues, ByteArrayInputStream is) throws Exception {

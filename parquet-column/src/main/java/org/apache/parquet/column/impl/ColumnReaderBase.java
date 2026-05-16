@@ -729,8 +729,6 @@ abstract class ColumnReaderBase implements ColumnReader {
   private void readPageV1(DataPageV1 page) {
     ValuesReader rlReader = page.getRlEncoding().getValuesReader(path, REPETITION_LEVEL);
     ValuesReader dlReader = page.getDlEncoding().getValuesReader(path, DEFINITION_LEVEL);
-    this.repetitionLevelColumn = new ValuesReaderIntIterator(rlReader);
-    this.definitionLevelColumn = new ValuesReaderIntIterator(dlReader);
     int valueCount = page.getValueCount();
     try {
       BytesInput bytes = page.getBytes();
@@ -741,6 +739,21 @@ abstract class ColumnReaderBase implements ColumnReader {
       LOG.debug("reading definition levels at {}", in.position());
       dlReader.initFromPage(valueCount, in);
       LOG.debug("reading data at {}", in.position());
+
+      if (valueCount <= PRE_DECODE_LEVEL_THRESHOLD) {
+        // Pre-decode all levels for the page using batch APIs
+        int[] rlLevels = new int[valueCount];
+        int[] dlLevels = new int[valueCount];
+        rlReader.readIntegers(rlLevels, 0, valueCount);
+        dlReader.readIntegers(dlLevels, 0, valueCount);
+        this.repetitionLevelColumn = new ArrayIntIterator(rlLevels);
+        this.definitionLevelColumn = new ArrayIntIterator(dlLevels);
+      } else {
+        // Fall back to on-demand decoding for very large pages
+        this.repetitionLevelColumn = new ValuesReaderIntIterator(rlReader);
+        this.definitionLevelColumn = new ValuesReaderIntIterator(dlReader);
+      }
+
       initDataReader(page.getValueEncoding(), in, valueCount);
     } catch (IOException e) {
       throw new ParquetDecodingException("could not read page " + page + " in col " + path, e);
@@ -749,9 +762,11 @@ abstract class ColumnReaderBase implements ColumnReader {
   }
 
   private void readPageV2(DataPageV2 page) {
-    this.repetitionLevelColumn = newRLEIterator(path.getMaxRepetitionLevel(), page.getRepetitionLevels());
-    this.definitionLevelColumn = newRLEIterator(path.getMaxDefinitionLevel(), page.getDefinitionLevels());
     int valueCount = page.getValueCount();
+    this.repetitionLevelColumn =
+        newPreDecodedRLEIterator(path.getMaxRepetitionLevel(), page.getRepetitionLevels(), valueCount);
+    this.definitionLevelColumn =
+        newPreDecodedRLEIterator(path.getMaxDefinitionLevel(), page.getDefinitionLevels(), valueCount);
     LOG.debug("page data size {} bytes and {} values", page.getData().size(), valueCount);
     try {
       initDataReader(page.getDataEncoding(), page.getData().toInputStream(), valueCount);
@@ -767,13 +782,26 @@ abstract class ColumnReaderBase implements ColumnReader {
 
   abstract void newPageInitialized(DataPage page);
 
-  private IntIterator newRLEIterator(int maxLevel, BytesInput bytes) {
+  /**
+   * Creates an IntIterator for RLE-encoded levels. For pages with valueCount within
+   * {@link #PRE_DECODE_LEVEL_THRESHOLD}, batch-decodes all levels upfront into an array
+   * so that {@code nextInt()} is a simple array read. For very large pages, falls back
+   * to on-demand decoding to avoid excessive memory allocation.
+   */
+  private IntIterator newPreDecodedRLEIterator(int maxLevel, BytesInput bytes, int valueCount) {
     try {
       if (maxLevel == 0) {
         return new NullIntIterator();
       }
-      return new RLEIntIterator(new RunLengthBitPackingHybridDecoder(
-          BytesUtils.getWidthFromMaxInt(maxLevel), bytes.toInputStream()));
+      RunLengthBitPackingHybridDecoder decoder = new RunLengthBitPackingHybridDecoder(
+          BytesUtils.getWidthFromMaxInt(maxLevel), bytes.toByteBuffer());
+      if (valueCount <= PRE_DECODE_LEVEL_THRESHOLD) {
+        int[] levels = new int[valueCount];
+        decoder.readInts(levels, 0, valueCount);
+        return new ArrayIntIterator(levels);
+      } else {
+        return new RLEIntIterator(decoder);
+      }
     } catch (IOException e) {
       throw new ParquetDecodingException("could not read levels in page for col " + path, e);
     }
@@ -805,15 +833,42 @@ abstract class ColumnReaderBase implements ColumnReader {
     return totalValueCount;
   }
 
+  /**
+   * Maximum number of level values to pre-decode into an array per page.
+   * Pages with more values than this fall back to on-demand decoding to
+   * avoid excessive memory allocation for pathological cases (e.g. pages
+   * with hundreds of millions of null values encoded as compact RLE).
+   */
+  private static final int PRE_DECODE_LEVEL_THRESHOLD = 1_000_000;
+
   abstract static class IntIterator {
     abstract int nextInt();
   }
 
-  static class ValuesReaderIntIterator extends IntIterator {
-    ValuesReader delegate;
+  /**
+   * Serves pre-decoded int values from an array. Used when all levels for a page
+   * have been batch-decoded upfront via {@link RunLengthBitPackingHybridDecoder#readInts}
+   * or {@link ValuesReader#readIntegers}.
+   */
+  static class ArrayIntIterator extends IntIterator {
+    private final int[] values;
+    private int pos;
 
-    public ValuesReaderIntIterator(ValuesReader delegate) {
-      super();
+    ArrayIntIterator(int[] values) {
+      this.values = values;
+    }
+
+    @Override
+    int nextInt() {
+      return values[pos++];
+    }
+  }
+
+  /** On-demand iterator wrapping a {@link ValuesReader} for V1 pages. */
+  static class ValuesReaderIntIterator extends IntIterator {
+    private final ValuesReader delegate;
+
+    ValuesReaderIntIterator(ValuesReader delegate) {
       this.delegate = delegate;
     }
 
@@ -823,20 +878,17 @@ abstract class ColumnReaderBase implements ColumnReader {
     }
   }
 
+  /** On-demand iterator wrapping a {@link RunLengthBitPackingHybridDecoder} for V2 pages. */
   static class RLEIntIterator extends IntIterator {
-    RunLengthBitPackingHybridDecoder delegate;
+    private final RunLengthBitPackingHybridDecoder delegate;
 
-    public RLEIntIterator(RunLengthBitPackingHybridDecoder delegate) {
+    RLEIntIterator(RunLengthBitPackingHybridDecoder delegate) {
       this.delegate = delegate;
     }
 
     @Override
     int nextInt() {
-      try {
-        return delegate.readInt();
-      } catch (IOException e) {
-        throw new ParquetDecodingException(e);
-      }
+      return delegate.readInt();
     }
   }
 
