@@ -78,6 +78,43 @@ public class DeltaBinaryPackingValuesWriterForInteger extends DeltaBinaryPacking
   }
 
   @Override
+  public void writeIntegers(int[] values, int offset, int length) {
+    if (length == 0) return;
+    int pos = offset;
+    int end = offset + length;
+
+    // Handle first value if not yet written
+    if (totalValueCount == 0) {
+      totalValueCount++;
+      firstValue = values[pos];
+      previousValue = firstValue;
+      pos++;
+    }
+
+    while (pos < end) {
+      int spaceInBlock = config.blockSizeInValues - deltaValuesToFlush;
+      int toWrite = Math.min(spaceInBlock, end - pos);
+
+      for (int i = 0; i < toWrite; i++) {
+        int v = values[pos + i];
+        int delta = v - previousValue;
+        previousValue = v;
+        deltaBlockBuffer[deltaValuesToFlush + i] = delta;
+        if (delta < minDeltaInCurrentBlock) {
+          minDeltaInCurrentBlock = delta;
+        }
+      }
+      deltaValuesToFlush += toWrite;
+      totalValueCount += toWrite;
+      pos += toWrite;
+
+      if (deltaValuesToFlush == config.blockSizeInValues) {
+        flushBlockBuffer();
+      }
+    }
+  }
+
+  @Override
   public void writeInteger(int v) {
     totalValueCount++;
 

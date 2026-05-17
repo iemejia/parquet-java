@@ -104,4 +104,14 @@ public class DeltaLengthByteArrayEncodingBenchmark {
     w.close();
     return bytes;
   }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeBatch() throws IOException {
+    ValuesWriter w = newWriter();
+    w.writeBinaries(data, 0, data.length);
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
 }

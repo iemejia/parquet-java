@@ -45,12 +45,28 @@ public class Utils {
     }
   }
 
+  public static void writeDataBatch(ValuesWriter writer, String[] strings) {
+    Binary[] binaries = new Binary[strings.length];
+    for (int i = 0; i < strings.length; i++) {
+      binaries[i] = Binary.fromString(strings[i]);
+    }
+    writer.writeBinaries(binaries, 0, binaries.length);
+  }
+
   public static Binary[] readData(ValuesReader reader, ByteBufferInputStream stream, int length) throws IOException {
     Binary[] bins = new Binary[length];
     reader.initFromPage(length, stream);
     for (int i = 0; i < length; i++) {
       bins[i] = reader.readBytes();
     }
+    return bins;
+  }
+
+  public static Binary[] readDataBatch(ValuesReader reader, ByteBufferInputStream stream, int length)
+      throws IOException {
+    Binary[] bins = new Binary[length];
+    reader.initFromPage(length, stream);
+    reader.readBinaries(bins, 0, length);
     return bins;
   }
 

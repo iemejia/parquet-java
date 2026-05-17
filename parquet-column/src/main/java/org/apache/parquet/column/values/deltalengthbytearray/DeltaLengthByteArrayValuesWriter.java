@@ -66,6 +66,25 @@ public class DeltaLengthByteArrayValuesWriter extends ValuesWriter {
     }
   }
 
+  @Override
+  public void writeBinaries(Binary[] values, int offset, int length) {
+    // Batch-write all lengths through the optimized integer batch path
+    int[] lengths = new int[length];
+    for (int i = 0; i < length; i++) {
+      lengths[i] = values[offset + i].length();
+    }
+    lengthWriter.writeIntegers(lengths, 0, length);
+
+    // Write binary data sequentially
+    try {
+      for (int i = 0; i < length; i++) {
+        values[offset + i].writeTo(arrayOut);
+      }
+    } catch (IOException e) {
+      throw new ParquetEncodingException("could not write bytes", e);
+    }
+  }
+
   /**
    * Writes raw bytes directly, avoiding Binary object creation overhead.
    * Used by {@link org.apache.parquet.column.values.deltastrings.DeltaByteArrayWriter}

@@ -72,6 +72,8 @@ public class DeltaBinaryPackedDecodingBenchmark {
 
   private byte[] intPage;
   private byte[] longPage;
+  private int[] intDest;
+  private long[] longDest;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
@@ -121,6 +123,9 @@ public class DeltaBinaryPackedDecodingBenchmark {
       longPage = w.getBytes().toByteArray();
       w.close();
     }
+
+    intDest = new int[VALUE_COUNT];
+    longDest = new long[VALUE_COUNT];
   }
 
   // ---- INT32 ----
@@ -135,6 +140,15 @@ public class DeltaBinaryPackedDecodingBenchmark {
     }
   }
 
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeIntBatch(Blackhole bh) throws IOException {
+    DeltaBinaryPackingValuesReader reader = new DeltaBinaryPackingValuesReader();
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(intPage)));
+    reader.readIntegers(intDest, 0, VALUE_COUNT);
+    bh.consume(intDest);
+  }
+
   // ---- INT64 ----
 
   @Benchmark
@@ -145,5 +159,14 @@ public class DeltaBinaryPackedDecodingBenchmark {
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(reader.readLong());
     }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeLongBatch(Blackhole bh) throws IOException {
+    DeltaBinaryPackingValuesReader reader = new DeltaBinaryPackingValuesReader();
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(longPage)));
+    reader.readLongs(longDest, 0, VALUE_COUNT);
+    bh.consume(longDest);
   }
 }

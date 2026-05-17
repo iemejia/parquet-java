@@ -252,6 +252,94 @@ public class DeltaBinaryPackingValuesWriterForLongTest {
     }
   }
 
+  @Test
+  public void shouldBatchWriteAlignedWithBlock() throws IOException {
+    long[] data = new long[5 * blockSize];
+    for (int i = 0; i < data.length; i++) {
+      data[i] = random.nextLong();
+    }
+    shouldBatchWriteAndRead(data);
+  }
+
+  @Test
+  public void shouldBatchWriteUnalignedWithBlock() throws IOException {
+    long[] data = new long[5 * blockSize + 3];
+    for (int i = 0; i < data.length; i++) {
+      data[i] = random.nextInt(20) - 10;
+    }
+    shouldBatchWriteAndRead(data);
+  }
+
+  @Test
+  public void shouldBatchWriteNegativeDeltas() throws IOException {
+    long[] data = new long[blockSize];
+    for (int i = 0; i < data.length; i++) {
+      data[i] = 10 - (i * 32 - random.nextInt(6));
+    }
+    shouldBatchWriteAndRead(data);
+  }
+
+  @Test
+  public void shouldBatchWriteAndBatchRead() throws IOException {
+    long[] data = new long[5 * blockSize + 3];
+    for (int i = 0; i < data.length; i++) {
+      data[i] = random.nextLong();
+    }
+    writer.writeLongs(data, 0, data.length);
+
+    reader = new DeltaBinaryPackingValuesReader();
+    reader.initFromPage(100, writer.getBytes().toInputStream());
+    long[] result = new long[data.length];
+    reader.readLongs(result, 0, data.length);
+
+    for (int i = 0; i < data.length; i++) {
+      assertEquals(data[i], result[i]);
+    }
+  }
+
+  @Test
+  public void shouldBatchReadInMultipleChunks() throws IOException {
+    long[] data = new long[5 * blockSize + 3];
+    for (int i = 0; i < data.length; i++) {
+      data[i] = random.nextLong();
+    }
+    writer.writeLongs(data, 0, data.length);
+
+    reader = new DeltaBinaryPackingValuesReader();
+    reader.initFromPage(100, writer.getBytes().toInputStream());
+
+    // Read in varying-size chunks
+    long[] result = new long[data.length];
+    int pos = 0;
+    int[] chunkSizes = {1, 7, 32, blockSize, blockSize - 1, 50};
+    int chunkIdx = 0;
+    while (pos < data.length) {
+      int chunk = Math.min(chunkSizes[chunkIdx % chunkSizes.length], data.length - pos);
+      reader.readLongs(result, pos, chunk);
+      pos += chunk;
+      chunkIdx++;
+    }
+
+    for (int i = 0; i < data.length; i++) {
+      assertEquals(data[i], result[i]);
+    }
+  }
+
+  @Test
+  public void batchWriteRandomDataTest() throws IOException {
+    int maxSize = 1000;
+    long[] data = new long[maxSize];
+
+    for (int round = 0; round < 100000; round++) {
+      int size = random.nextInt(maxSize);
+      for (int i = 0; i < size; i++) {
+        data[i] = random.nextLong();
+      }
+      shouldBatchReadAndWrite(data, size);
+      writer.reset();
+    }
+  }
+
   private void shouldWriteAndRead(long[] data) throws IOException {
     shouldReadAndWrite(data, data.length);
   }
@@ -284,6 +372,20 @@ public class DeltaBinaryPackingValuesWriterForLongTest {
   private void writeData(long[] data, int length) {
     for (int i = 0; i < length; i++) {
       writer.writeLong(data[i]);
+    }
+  }
+
+  private void shouldBatchWriteAndRead(long[] data) throws IOException {
+    shouldBatchReadAndWrite(data, data.length);
+  }
+
+  private void shouldBatchReadAndWrite(long[] data, int length) throws IOException {
+    writer.writeLongs(data, 0, length);
+    reader = new DeltaBinaryPackingValuesReader();
+    reader.initFromPage(100, writer.getBytes().toInputStream());
+
+    for (int i = 0; i < length; i++) {
+      assertEquals(data[i], reader.readLong());
     }
   }
 }

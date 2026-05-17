@@ -19,6 +19,7 @@
 package org.apache.parquet.column.values.deltastrings;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.DirectByteBufferAllocator;
@@ -61,6 +62,71 @@ public class TestDeltaByteArray {
     DeltaByteArrayWriter writer = new DeltaByteArrayWriter(64 * 1024, 64 * 1024, new DirectByteBufferAllocator());
     DeltaByteArrayReader reader = new DeltaByteArrayReader();
     assertReadWriteWithSkipN(writer, reader, randvalues);
+  }
+
+  @Test
+  public void testBatchSerialization() throws Exception {
+    DeltaByteArrayWriter writer = new DeltaByteArrayWriter(64 * 1024, 64 * 1024, new DirectByteBufferAllocator());
+    DeltaByteArrayReader reader = new DeltaByteArrayReader();
+
+    Utils.writeData(writer, values);
+    Binary[] bin = Utils.readDataBatch(reader, writer.getBytes().toInputStream(), values.length);
+
+    for (int i = 0; i < bin.length; i++) {
+      Assert.assertEquals(Binary.fromString(values[i]), bin[i]);
+    }
+  }
+
+  @Test
+  public void testBatchRandomStrings() throws Exception {
+    DeltaByteArrayWriter writer = new DeltaByteArrayWriter(64 * 1024, 64 * 1024, new DirectByteBufferAllocator());
+    DeltaByteArrayReader reader = new DeltaByteArrayReader();
+
+    Utils.writeData(writer, randvalues);
+    Binary[] bin = Utils.readDataBatch(reader, writer.getBytes().toInputStream(), randvalues.length);
+
+    for (int i = 0; i < bin.length; i++) {
+      Assert.assertEquals(Binary.fromString(randvalues[i]), bin[i]);
+    }
+  }
+
+  @Test
+  public void testBatchWriteSerialization() throws Exception {
+    DeltaByteArrayWriter writer = new DeltaByteArrayWriter(64 * 1024, 64 * 1024, new DirectByteBufferAllocator());
+    DeltaByteArrayReader reader = new DeltaByteArrayReader();
+
+    Utils.writeDataBatch(writer, values);
+    Binary[] bin = Utils.readData(reader, writer.getBytes().toInputStream(), values.length);
+
+    for (int i = 0; i < bin.length; i++) {
+      Assert.assertEquals(Binary.fromString(values[i]), bin[i]);
+    }
+  }
+
+  @Test
+  public void testBatchWriteAndBatchRead() throws Exception {
+    DeltaByteArrayWriter writer = new DeltaByteArrayWriter(64 * 1024, 64 * 1024, new DirectByteBufferAllocator());
+    DeltaByteArrayReader reader = new DeltaByteArrayReader();
+
+    Utils.writeDataBatch(writer, values);
+    Binary[] bin = Utils.readDataBatch(reader, writer.getBytes().toInputStream(), values.length);
+
+    for (int i = 0; i < bin.length; i++) {
+      Assert.assertEquals(Binary.fromString(values[i]), bin[i]);
+    }
+  }
+
+  @Test
+  public void testBatchWriteRandomStrings() throws Exception {
+    DeltaByteArrayWriter writer = new DeltaByteArrayWriter(64 * 1024, 64 * 1024, new DirectByteBufferAllocator());
+    DeltaByteArrayReader reader = new DeltaByteArrayReader();
+
+    Utils.writeDataBatch(writer, randvalues);
+    Binary[] bin = Utils.readDataBatch(reader, writer.getBytes().toInputStream(), randvalues.length);
+
+    for (int i = 0; i < bin.length; i++) {
+      Assert.assertEquals(Binary.fromString(randvalues[i]), bin[i]);
+    }
   }
 
   @Test
@@ -148,5 +214,80 @@ public class TestDeltaByteArray {
     Assert.assertEquals(Binary.fromString("parquet-000"), decoded[0]);
     Assert.assertEquals(Binary.fromString("parquet-111"), decoded[1]);
     Assert.assertEquals(Binary.fromString("parquet-222"), decoded[2]);
+  }
+
+  @Test
+  public void testBatchWriteByteBufferBackedBinaries() throws Exception {
+    DeltaByteArrayWriter writer = new DeltaByteArrayWriter(64 * 1024, 64 * 1024, new DirectByteBufferAllocator());
+    DeltaByteArrayReader reader = new DeltaByteArrayReader();
+
+    // Create ByteBuffer-backed Binaries (heap ByteBuffer)
+    Binary[] input = new Binary[values.length];
+    for (int i = 0; i < values.length; i++) {
+      byte[] bytes = values[i].getBytes(StandardCharsets.UTF_8);
+      ByteBuffer buf = ByteBuffer.wrap(bytes);
+      input[i] = Binary.fromConstantByteBuffer(buf);
+    }
+    writer.writeBinaries(input, 0, input.length);
+
+    Binary[] decoded = Utils.readDataBatch(reader, writer.getBytes().toInputStream(), input.length);
+    for (int i = 0; i < input.length; i++) {
+      Assert.assertEquals(Binary.fromString(values[i]), decoded[i]);
+    }
+  }
+
+  @Test
+  public void testBatchWriteByteBufferBackedBinariesRandomStrings() throws Exception {
+    DeltaByteArrayWriter writer = new DeltaByteArrayWriter(64 * 1024, 64 * 1024, new DirectByteBufferAllocator());
+    DeltaByteArrayReader reader = new DeltaByteArrayReader();
+
+    // Create ByteBuffer-backed Binaries from random strings
+    Binary[] input = new Binary[randvalues.length];
+    for (int i = 0; i < randvalues.length; i++) {
+      byte[] bytes = randvalues[i].getBytes(StandardCharsets.UTF_8);
+      ByteBuffer buf = ByteBuffer.wrap(bytes);
+      input[i] = Binary.fromConstantByteBuffer(buf);
+    }
+    writer.writeBinaries(input, 0, input.length);
+
+    Binary[] decoded = Utils.readDataBatch(reader, writer.getBytes().toInputStream(), input.length);
+    for (int i = 0; i < input.length; i++) {
+      Assert.assertEquals(Binary.fromString(randvalues[i]), decoded[i]);
+    }
+  }
+
+  @Test
+  public void testBatchWriteDirectByteBufferBackedBinaries() throws Exception {
+    DeltaByteArrayWriter writer = new DeltaByteArrayWriter(64 * 1024, 64 * 1024, new DirectByteBufferAllocator());
+    DeltaByteArrayReader reader = new DeltaByteArrayReader();
+
+    // Create direct (off-heap) ByteBuffer-backed Binaries
+    Binary[] input = new Binary[values.length];
+    for (int i = 0; i < values.length; i++) {
+      byte[] bytes = values[i].getBytes(StandardCharsets.UTF_8);
+      ByteBuffer buf = ByteBuffer.allocateDirect(bytes.length);
+      buf.put(bytes).flip();
+      input[i] = Binary.fromConstantByteBuffer(buf);
+    }
+    writer.writeBinaries(input, 0, input.length);
+
+    // Batch write + scalar read
+    Binary[] decoded = Utils.readData(reader, writer.getBytes().toInputStream(), input.length);
+    for (int i = 0; i < input.length; i++) {
+      Assert.assertEquals(Binary.fromString(values[i]), decoded[i]);
+    }
+  }
+
+  @Test
+  public void testBatchWriteRandomStringsScalarRead() throws Exception {
+    DeltaByteArrayWriter writer = new DeltaByteArrayWriter(64 * 1024, 64 * 1024, new DirectByteBufferAllocator());
+    DeltaByteArrayReader reader = new DeltaByteArrayReader();
+
+    Utils.writeDataBatch(writer, randvalues);
+    Binary[] bin = Utils.readData(reader, writer.getBytes().toInputStream(), randvalues.length);
+
+    for (int i = 0; i < bin.length; i++) {
+      Assert.assertEquals(Binary.fromString(randvalues[i]), bin[i]);
+    }
   }
 }

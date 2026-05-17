@@ -120,6 +120,16 @@ public class DeltaBinaryPackedEncodingBenchmark {
     return bytes;
   }
 
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeIntBatch() throws IOException {
+    ValuesWriter w = newIntWriter();
+    w.writeIntegers(intData, 0, VALUE_COUNT);
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
   // ---- INT64 ----
 
   @Benchmark
@@ -129,6 +139,16 @@ public class DeltaBinaryPackedEncodingBenchmark {
     for (long v : longData) {
       w.writeLong(v);
     }
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeLongBatch() throws IOException {
+    ValuesWriter w = newLongWriter();
+    w.writeLongs(longData, 0, VALUE_COUNT);
     byte[] bytes = w.getBytes().toByteArray();
     w.close();
     return bytes;

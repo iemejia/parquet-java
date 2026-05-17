@@ -143,4 +143,14 @@ public class LongDeltaDecodingBenchmark {
       bh.consume(reader.readLong());
     }
   }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public long[] decodeDeltaLongBatch() throws IOException {
+    DeltaBinaryPackingValuesReader reader = new DeltaBinaryPackingValuesReader();
+    reader.initFromPage(VALUE_COUNT, ByteBufferInputStream.wrap(ByteBuffer.wrap(encoded)));
+    long[] out = new long[VALUE_COUNT];
+    reader.readLongs(out, 0, VALUE_COUNT);
+    return out;
+  }
 }

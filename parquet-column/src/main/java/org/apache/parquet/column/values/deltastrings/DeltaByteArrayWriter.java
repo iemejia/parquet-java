@@ -107,4 +107,25 @@ public class DeltaByteArrayWriter extends ValuesWriter {
     previous = vb;
   }
 
+  @Override
+  public void writeBinaries(Binary[] values, int offset, int length) {
+    // Collect prefix lengths; suffix writes must stay sequential because each
+    // suffix depends on the prefix match against the previous value.
+    int[] prefixLengths = new int[length];
+
+    for (int idx = 0; idx < length; idx++) {
+      byte[] vb = values[offset + idx].copy().getBytesUnsafe();
+      int commonLen = Math.min(previous.length, vb.length);
+      int pl = Arrays.mismatch(previous, 0, commonLen, vb, 0, commonLen);
+      if (pl < 0) {
+        pl = commonLen;
+      }
+      prefixLengths[idx] = pl;
+      suffixWriter.writeBytes(vb, pl, vb.length - pl);
+      previous = vb;
+    }
+
+    // Batch-write all prefix lengths through the optimized integer batch path
+    prefixLengthWriter.writeIntegers(prefixLengths, 0, length);
+  }
 }

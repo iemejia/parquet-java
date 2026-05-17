@@ -150,6 +150,16 @@ public class DeltaByteArrayEncodingBenchmark {
     return bytes;
   }
 
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeBinaryBatch(BinaryState state) throws IOException {
+    ValuesWriter w = newWriter();
+    w.writeBinaries(state.data, 0, state.data.length);
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
   // ---- FIXED_LEN_BYTE_ARRAY ----
 
   @Benchmark
@@ -159,6 +169,16 @@ public class DeltaByteArrayEncodingBenchmark {
     for (Binary v : state.data) {
       w.writeBytes(v);
     }
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeFlbaBatch(FlbaState state) throws IOException {
+    ValuesWriter w = newWriter();
+    w.writeBinaries(state.data, 0, state.data.length);
     byte[] bytes = w.getBytes().toByteArray();
     w.close();
     return bytes;
