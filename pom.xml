@@ -605,6 +605,8 @@
               <!-- Refactoring of RunLengthBitPackingHybridDecoder: constructor replaced and readInt() no longer throws checked exception -->
               <exclude>org.apache.parquet.column.values.rle.RunLengthBitPackingHybridDecoder#readInt()</exclude>
               <exclude>org.apache.parquet.column.values.rle.RunLengthBitPackingHybridDecoder#RunLengthBitPackingHybridDecoder(int,java.io.InputStream)</exclude>
+              <!-- Removal of unused 3-argument constructor (only the 4-argument constructor with blockSizeInValues was used) -->
+              <exclude>org.apache.parquet.column.values.delta.DeltaBinaryPackingValuesWriter#DeltaBinaryPackingValuesWriter(int,int,org.apache.parquet.bytes.ByteBufferAllocator)</exclude>
               <!-- Make static variables final -->
               <exclude>org.apache.parquet.avro.AvroReadSupport#AVRO_REQUESTED_PROJECTION</exclude>
               <exclude>org.apache.parquet.avro.AvroReadSupport#AVRO_DATA_SUPPLIER</exclude>
