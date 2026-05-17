@@ -45,12 +45,22 @@ abstract class ColumnWriterBase implements ColumnWriter {
   // the java compiler (not the JIT) to remove the unused statements during build time.
   private static final boolean DEBUG = false;
 
+  // Buffer size for batching level writes to the RLE encoder.
+  // Chosen to balance between amortizing per-value virtual dispatch overhead
+  // and keeping the buffer small enough to stay in L1 cache.
+  static final int LEVEL_BUFFER_SIZE = 1024;
+
   final ColumnDescriptor path;
   final PageWriter pageWriter;
   private ValuesWriter repetitionLevelColumn;
   private ValuesWriter definitionLevelColumn;
   private ValuesWriter dataColumn;
   private int valueCount;
+
+  // Buffers for batching repetition/definition level writes
+  private final int[] rlBuffer = new int[LEVEL_BUFFER_SIZE];
+  private final int[] dlBuffer = new int[LEVEL_BUFFER_SIZE];
+  private int levelBufferPos = 0;
 
   private long rowsWrittenSoFar = 0;
   private int pageRowCount;
@@ -90,15 +100,34 @@ abstract class ColumnWriterBase implements ColumnWriter {
   }
 
   private void definitionLevel(int definitionLevel) {
-    definitionLevelColumn.writeInteger(definitionLevel);
+    dlBuffer[levelBufferPos] = definitionLevel;
+    if (++levelBufferPos == LEVEL_BUFFER_SIZE) {
+      flushLevelBuffers();
+    }
   }
 
   private void repetitionLevel(int repetitionLevel) {
-    repetitionLevelColumn.writeInteger(repetitionLevel);
-    assert pageRowCount == 0 ? repetitionLevel == 0 : true : "Every page shall start on record boundaries";
-    if (repetitionLevel == 0) {
-      ++pageRowCount;
+    assert (pageRowCount > 0 || levelBufferPos > 0) || repetitionLevel == 0
+        : "Every page shall start on record boundaries";
+    rlBuffer[levelBufferPos] = repetitionLevel;
+  }
+
+  /**
+   * Flushes the buffered repetition and definition levels to their respective encoders in batch,
+   * and updates the page row count by counting new records (repetition level == 0).
+   */
+  private void flushLevelBuffers() {
+    if (levelBufferPos == 0) {
+      return;
     }
+    repetitionLevelColumn.writeIntegers(rlBuffer, 0, levelBufferPos);
+    definitionLevelColumn.writeIntegers(dlBuffer, 0, levelBufferPos);
+    for (int i = 0; i < levelBufferPos; i++) {
+      if (rlBuffer[i] == 0) {
+        ++pageRowCount;
+      }
+    }
+    levelBufferPos = 0;
   }
 
   /**
@@ -373,6 +402,7 @@ abstract class ColumnWriterBase implements ColumnWriter {
       return;
     }
     try {
+      flushLevelBuffers();
       this.rowsWrittenSoFar += pageRowCount;
       if (DEBUG) LOG.debug("write page");
       try {

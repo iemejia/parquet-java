@@ -793,8 +793,8 @@ abstract class ColumnReaderBase implements ColumnReader {
       if (maxLevel == 0) {
         return new NullIntIterator();
       }
-      RunLengthBitPackingHybridDecoder decoder = new RunLengthBitPackingHybridDecoder(
-          BytesUtils.getWidthFromMaxInt(maxLevel), bytes.toByteBuffer());
+      RunLengthBitPackingHybridDecoder decoder =
+          new RunLengthBitPackingHybridDecoder(BytesUtils.getWidthFromMaxInt(maxLevel), bytes.toByteBuffer());
       if (valueCount <= PRE_DECODE_LEVEL_THRESHOLD) {
         int[] levels = new int[valueCount];
         decoder.readInts(levels, 0, valueCount);

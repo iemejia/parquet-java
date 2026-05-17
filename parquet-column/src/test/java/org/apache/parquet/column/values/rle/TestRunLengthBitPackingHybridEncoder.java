@@ -388,8 +388,7 @@ public class TestRunLengthBitPackingHybridEncoder {
     encoder.writeInts(values, 2, 20);
     byte[] encoded = encoder.toBytes().toByteArray();
 
-    RunLengthBitPackingHybridDecoder decoder =
-        new RunLengthBitPackingHybridDecoder(3, ByteBuffer.wrap(encoded));
+    RunLengthBitPackingHybridDecoder decoder = new RunLengthBitPackingHybridDecoder(3, ByteBuffer.wrap(encoded));
     for (int i = 0; i < 10; i++) assertEquals(4, decoder.readInt());
     for (int i = 0; i < 10; i++) assertEquals(5, decoder.readInt());
   }
@@ -444,8 +443,7 @@ public class TestRunLengthBitPackingHybridEncoder {
     }
 
     // Also verify readBooleans round-trip
-    RunLengthBitPackingHybridDecoder boolDec =
-        new RunLengthBitPackingHybridDecoder(1, ByteBuffer.wrap(batchBytes));
+    RunLengthBitPackingHybridDecoder boolDec = new RunLengthBitPackingHybridDecoder(1, ByteBuffer.wrap(batchBytes));
     boolean[] decoded = new boolean[values.length];
     boolDec.readBooleans(decoded, 0, values.length);
     for (int i = 0; i < values.length; i++) {
@@ -497,8 +495,7 @@ public class TestRunLengthBitPackingHybridEncoder {
     encoder.writeBooleans(values, 2, 6); // false, false, false, true, true, true
     byte[] encoded = encoder.toBytes().toByteArray();
 
-    RunLengthBitPackingHybridDecoder decoder =
-        new RunLengthBitPackingHybridDecoder(1, ByteBuffer.wrap(encoded));
+    RunLengthBitPackingHybridDecoder decoder = new RunLengthBitPackingHybridDecoder(1, ByteBuffer.wrap(encoded));
     boolean[] decoded = new boolean[6];
     decoder.readBooleans(decoded, 0, 6);
     for (int i = 0; i < 6; i++) {
@@ -517,8 +514,7 @@ public class TestRunLengthBitPackingHybridEncoder {
     }
     byte[] encoded = encoder.toBytes().toByteArray();
 
-    RunLengthBitPackingHybridDecoder decoder =
-        new RunLengthBitPackingHybridDecoder(1, ByteBuffer.wrap(encoded));
+    RunLengthBitPackingHybridDecoder decoder = new RunLengthBitPackingHybridDecoder(1, ByteBuffer.wrap(encoded));
     boolean[] decoded = new boolean[100];
     decoder.readBooleans(decoded, 0, 100);
     for (int i = 0; i < 100; i++) {
