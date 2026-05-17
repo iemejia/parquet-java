@@ -133,6 +133,98 @@ public abstract class ByteStreamSplitValuesWriter extends ValuesWriter {
   }
 
   /**
+   * Bulk-buffer an array of 4-byte integer values. Uses {@link System#arraycopy} to fill the
+   * internal batch, flushing as needed. Avoids per-value method dispatch overhead.
+   */
+  protected void bufferInts(int[] values, int offset, int length) {
+    if (intBatch == null) {
+      intBatch = new int[BATCH_SIZE];
+      scatterBuf = new byte[BATCH_SIZE];
+    }
+    int pos = offset;
+    int end = offset + length;
+    while (pos < end) {
+      int toCopy = Math.min(end - pos, BATCH_SIZE - batchCount);
+      System.arraycopy(values, pos, intBatch, batchCount, toCopy);
+      batchCount += toCopy;
+      pos += toCopy;
+      if (batchCount == BATCH_SIZE) {
+        flushIntBatch();
+      }
+    }
+  }
+
+  /**
+   * Bulk-buffer an array of 8-byte long values. Uses {@link System#arraycopy} to fill the
+   * internal batch, flushing as needed. Avoids per-value method dispatch overhead.
+   */
+  protected void bufferLongs(long[] values, int offset, int length) {
+    if (longBatch == null) {
+      longBatch = new long[BATCH_SIZE];
+      scatterBuf = new byte[BATCH_SIZE];
+    }
+    int pos = offset;
+    int end = offset + length;
+    while (pos < end) {
+      int toCopy = Math.min(end - pos, BATCH_SIZE - batchCount);
+      System.arraycopy(values, pos, longBatch, batchCount, toCopy);
+      batchCount += toCopy;
+      pos += toCopy;
+      if (batchCount == BATCH_SIZE) {
+        flushLongBatch();
+      }
+    }
+  }
+
+  /**
+   * Bulk-buffer an array of float values as 4-byte integers (via {@link Float#floatToIntBits}).
+   * Fills the internal batch directly in chunks, avoiding per-value {@link #bufferInt} dispatch.
+   */
+  protected void bufferFloatsAsInts(float[] values, int offset, int length) {
+    if (intBatch == null) {
+      intBatch = new int[BATCH_SIZE];
+      scatterBuf = new byte[BATCH_SIZE];
+    }
+    int pos = offset;
+    int end = offset + length;
+    while (pos < end) {
+      int toCopy = Math.min(end - pos, BATCH_SIZE - batchCount);
+      for (int i = 0; i < toCopy; i++) {
+        intBatch[batchCount + i] = Float.floatToIntBits(values[pos + i]);
+      }
+      batchCount += toCopy;
+      pos += toCopy;
+      if (batchCount == BATCH_SIZE) {
+        flushIntBatch();
+      }
+    }
+  }
+
+  /**
+   * Bulk-buffer an array of double values as 8-byte longs (via {@link Double#doubleToLongBits}).
+   * Fills the internal batch directly in chunks, avoiding per-value {@link #bufferLong} dispatch.
+   */
+  protected void bufferDoublesAsLongs(double[] values, int offset, int length) {
+    if (longBatch == null) {
+      longBatch = new long[BATCH_SIZE];
+      scatterBuf = new byte[BATCH_SIZE];
+    }
+    int pos = offset;
+    int end = offset + length;
+    while (pos < end) {
+      int toCopy = Math.min(end - pos, BATCH_SIZE - batchCount);
+      for (int i = 0; i < toCopy; i++) {
+        longBatch[batchCount + i] = Double.doubleToLongBits(values[pos + i]);
+      }
+      batchCount += toCopy;
+      pos += toCopy;
+      if (batchCount == BATCH_SIZE) {
+        flushLongBatch();
+      }
+    }
+  }
+
+  /**
    * Buffer an 8-byte long value for batched scatter to the byte streams.
    */
   protected void bufferLong(long v) {
@@ -202,6 +294,11 @@ public abstract class ByteStreamSplitValuesWriter extends ValuesWriter {
     }
 
     @Override
+    public void writeFloats(float[] values, int offset, int length) {
+      bufferFloatsAsInts(values, offset, length);
+    }
+
+    @Override
     public String memUsageString(String prefix) {
       return String.format("%s FloatByteStreamSplitWriter %d bytes", prefix, getAllocatedSize());
     }
@@ -216,6 +313,11 @@ public abstract class ByteStreamSplitValuesWriter extends ValuesWriter {
     @Override
     public void writeDouble(double v) {
       bufferLong(Double.doubleToLongBits(v));
+    }
+
+    @Override
+    public void writeDoubles(double[] values, int offset, int length) {
+      bufferDoublesAsLongs(values, offset, length);
     }
 
     @Override
@@ -235,6 +337,11 @@ public abstract class ByteStreamSplitValuesWriter extends ValuesWriter {
     }
 
     @Override
+    public void writeIntegers(int[] values, int offset, int length) {
+      bufferInts(values, offset, length);
+    }
+
+    @Override
     public String memUsageString(String prefix) {
       return String.format("%s IntegerByteStreamSplitWriter %d bytes", prefix, getAllocatedSize());
     }
@@ -248,6 +355,11 @@ public abstract class ByteStreamSplitValuesWriter extends ValuesWriter {
     @Override
     public void writeLong(long v) {
       bufferLong(v);
+    }
+
+    @Override
+    public void writeLongs(long[] values, int offset, int length) {
+      bufferLongs(values, offset, length);
     }
 
     @Override
@@ -281,6 +393,26 @@ public abstract class ByteStreamSplitValuesWriter extends ValuesWriter {
       flbaBatchCount++;
       if (flbaBatchCount == BATCH_SIZE) {
         flushFlbaBatch();
+      }
+    }
+
+    @Override
+    public void writeBinaries(Binary[] values, int offset, int len) {
+      if (batchBufs == null) {
+        batchBufs = new byte[length][BATCH_SIZE];
+      }
+      for (int i = offset; i < offset + len; i++) {
+        Binary v = values[i];
+        assert (v.length() == length)
+            : ("Fixed Binary size " + v.length() + " does not match field type length " + length);
+        byte[] bytes = v.getBytesUnsafe();
+        for (int stream = 0; stream < length; stream++) {
+          batchBufs[stream][flbaBatchCount] = bytes[stream];
+        }
+        flbaBatchCount++;
+        if (flbaBatchCount == BATCH_SIZE) {
+          flushFlbaBatch();
+        }
       }
     }
 

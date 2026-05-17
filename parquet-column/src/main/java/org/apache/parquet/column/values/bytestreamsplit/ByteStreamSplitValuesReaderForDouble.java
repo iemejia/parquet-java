@@ -27,4 +27,11 @@ public class ByteStreamSplitValuesReaderForDouble extends ByteStreamSplitValuesR
   public double readDouble() {
     return decodedDataBuffer.getDouble(nextElementByteOffset());
   }
+
+  @Override
+  public void readDoubles(double[] dest, int offset, int count) {
+    int byteOffset = advanceByteOffset(count);
+    decodedDataBuffer.position(byteOffset);
+    decodedDataBuffer.asDoubleBuffer().get(dest, offset, count);
+  }
 }

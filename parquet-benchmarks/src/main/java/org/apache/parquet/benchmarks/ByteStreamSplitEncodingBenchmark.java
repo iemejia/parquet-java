@@ -111,6 +111,28 @@ public class ByteStreamSplitEncodingBenchmark {
 
   @Benchmark
   @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeFloatBatch() throws IOException {
+    ValuesWriter w = new ByteStreamSplitValuesWriter.FloatByteStreamSplitValuesWriter(
+        INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    w.writeFloats(floatData, 0, VALUE_COUNT);
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeDoubleBatch() throws IOException {
+    ValuesWriter w = new ByteStreamSplitValuesWriter.DoubleByteStreamSplitValuesWriter(
+        INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    w.writeDoubles(doubleData, 0, VALUE_COUNT);
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
   public byte[] encodeInt() throws IOException {
     ValuesWriter w = new ByteStreamSplitValuesWriter.IntegerByteStreamSplitValuesWriter(
         INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
@@ -130,6 +152,28 @@ public class ByteStreamSplitEncodingBenchmark {
     for (long v : longData) {
       w.writeLong(v);
     }
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeIntBatch() throws IOException {
+    ValuesWriter w = new ByteStreamSplitValuesWriter.IntegerByteStreamSplitValuesWriter(
+        INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    w.writeIntegers(intData, 0, VALUE_COUNT);
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeLongBatch() throws IOException {
+    ValuesWriter w = new ByteStreamSplitValuesWriter.LongByteStreamSplitValuesWriter(
+        INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    w.writeLongs(longData, 0, VALUE_COUNT);
     byte[] bytes = w.getBytes().toByteArray();
     w.close();
     return bytes;
@@ -159,6 +203,18 @@ public class ByteStreamSplitEncodingBenchmark {
     for (Binary v : state.data) {
       w.writeBytes(v);
     }
+    byte[] bytes = w.getBytes().toByteArray();
+    w.close();
+    return bytes;
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public byte[] encodeFlbaBatch(FlbaState state) throws IOException {
+    ByteStreamSplitValuesWriter.FixedLenByteArrayByteStreamSplitValuesWriter w =
+        new ByteStreamSplitValuesWriter.FixedLenByteArrayByteStreamSplitValuesWriter(
+            state.fixedLength, INIT_SLAB_SIZE, PAGE_SIZE, new HeapByteBufferAllocator());
+    w.writeBinaries(state.data, 0, VALUE_COUNT);
     byte[] bytes = w.getBytes().toByteArray();
     w.close();
     return bytes;

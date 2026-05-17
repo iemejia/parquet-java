@@ -52,9 +52,10 @@ import org.openjdk.jmh.infra.Blackhole;
  * Parquet types that support it: {@code FLOAT}, {@code DOUBLE}, {@code INT32},
  * {@code INT64}, and {@code FIXED_LEN_BYTE_ARRAY}.
  *
- * <p>Fixed-width numeric types are benchmarked directly by top-level methods.
- * {@code FIXED_LEN_BYTE_ARRAY} uses an inner {@link FlbaState} parameterised by
- * {@code fixedLength} to avoid cross-product pollution with the numeric benchmarks.
+ * <p>Fixed-width numeric types are benchmarked directly by top-level methods (both
+ * scalar and batch variants). {@code FIXED_LEN_BYTE_ARRAY} uses an inner
+ * {@link FlbaState} parameterised by {@code fixedLength} to avoid cross-product
+ * pollution with the numeric benchmarks.
  *
  * <p>Each invocation decodes {@value #VALUE_COUNT} values; throughput is reported
  * per-value via {@link OperationsPerInvocation}. The cost includes both
@@ -78,6 +79,12 @@ public class ByteStreamSplitDecodingBenchmark {
   private byte[] doublePage;
   private byte[] intPage;
   private byte[] longPage;
+
+  // Pre-allocated batch destination arrays (avoid per-invocation allocation artifact)
+  private float[] floatDest;
+  private double[] doubleDest;
+  private int[] intDest;
+  private long[] longDest;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
@@ -129,6 +136,11 @@ public class ByteStreamSplitDecodingBenchmark {
       longPage = w.getBytes().toByteArray();
       w.close();
     }
+
+    floatDest = new float[VALUE_COUNT];
+    doubleDest = new double[VALUE_COUNT];
+    intDest = new int[VALUE_COUNT];
+    longDest = new long[VALUE_COUNT];
   }
 
   private static void init(ByteStreamSplitValuesReader r, byte[] page) throws IOException {
@@ -175,6 +187,42 @@ public class ByteStreamSplitDecodingBenchmark {
     }
   }
 
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeFloatBatch(Blackhole bh) throws IOException {
+    ByteStreamSplitValuesReaderForFloat r = new ByteStreamSplitValuesReaderForFloat();
+    init(r, floatPage);
+    r.readFloats(floatDest, 0, VALUE_COUNT);
+    bh.consume(floatDest);
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeDoubleBatch(Blackhole bh) throws IOException {
+    ByteStreamSplitValuesReaderForDouble r = new ByteStreamSplitValuesReaderForDouble();
+    init(r, doublePage);
+    r.readDoubles(doubleDest, 0, VALUE_COUNT);
+    bh.consume(doubleDest);
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeIntBatch(Blackhole bh) throws IOException {
+    ByteStreamSplitValuesReaderForInteger r = new ByteStreamSplitValuesReaderForInteger();
+    init(r, intPage);
+    r.readIntegers(intDest, 0, VALUE_COUNT);
+    bh.consume(intDest);
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeLongBatch(Blackhole bh) throws IOException {
+    ByteStreamSplitValuesReaderForLong r = new ByteStreamSplitValuesReaderForLong();
+    init(r, longPage);
+    r.readLongs(longDest, 0, VALUE_COUNT);
+    bh.consume(longDest);
+  }
+
   // ---- FIXED_LEN_BYTE_ARRAY (parameterised by fixedLength) ----
 
   @State(Scope.Thread)
@@ -183,6 +231,7 @@ public class ByteStreamSplitDecodingBenchmark {
     public int fixedLength;
 
     byte[] flbaPage;
+    Binary[] flbaDest;
 
     @Setup(Level.Trial)
     public void setup() throws IOException {
@@ -195,6 +244,7 @@ public class ByteStreamSplitDecodingBenchmark {
       }
       flbaPage = w.getBytes().toByteArray();
       w.close();
+      flbaDest = new Binary[VALUE_COUNT];
     }
   }
 
@@ -206,5 +256,14 @@ public class ByteStreamSplitDecodingBenchmark {
     for (int i = 0; i < VALUE_COUNT; i++) {
       bh.consume(r.readBytes());
     }
+  }
+
+  @Benchmark
+  @OperationsPerInvocation(VALUE_COUNT)
+  public void decodeFlbaBatch(FlbaState state, Blackhole bh) throws IOException {
+    ByteStreamSplitValuesReaderForFLBA r = new ByteStreamSplitValuesReaderForFLBA(state.fixedLength);
+    init(r, state.flbaPage);
+    r.readBinaries(state.flbaDest, 0, VALUE_COUNT);
+    bh.consume(state.flbaDest);
   }
 }
