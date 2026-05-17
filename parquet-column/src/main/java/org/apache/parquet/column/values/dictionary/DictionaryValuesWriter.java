@@ -257,6 +257,23 @@ public abstract class DictionaryValuesWriter extends ValuesWriter implements Req
     }
 
     @Override
+    public void writeBinaries(Binary[] values, int offset, int length) {
+      for (int i = offset; i < offset + length; i++) {
+        Binary v = values[i];
+        int id = binaryDictionaryContent.getInt(v);
+        if (id == -1) {
+          id = dictionaryValues.size();
+          Binary copied = v.copy();
+          binaryDictionaryContent.put(copied, id);
+          dictionaryValues.add(copied);
+          // length as int (4 bytes) + actual bytes
+          dictionaryByteSize += 4L + v.length();
+        }
+        encodedValues.add(id);
+      }
+    }
+
+    @Override
     public DictionaryPage toDictPageAndClose() {
       if (lastUsedDictionarySize > 0) {
         // return a dictionary only if we actually used it
@@ -321,6 +338,22 @@ public abstract class DictionaryValuesWriter extends ValuesWriter implements Req
     }
 
     @Override
+    public void writeBinaries(Binary[] values, int offset, int len) {
+      for (int i = offset; i < offset + len; i++) {
+        Binary value = values[i];
+        int id = binaryDictionaryContent.getInt(value);
+        if (id == -1) {
+          id = dictionaryValues.size();
+          Binary copied = value.copy();
+          binaryDictionaryContent.put(copied, id);
+          dictionaryValues.add(copied);
+          dictionaryByteSize += length;
+        }
+        encodedValues.add(id);
+      }
+    }
+
+    @Override
     public DictionaryPage toDictPageAndClose() {
       if (lastUsedDictionarySize > 0) {
         // return a dictionary only if we actually used it
@@ -361,6 +394,21 @@ public abstract class DictionaryValuesWriter extends ValuesWriter implements Req
         dictionaryByteSize += 8;
       }
       encodedValues.add(id);
+    }
+
+    @Override
+    public void writeLongs(long[] values, int offset, int length) {
+      for (int i = offset; i < offset + length; i++) {
+        long v = values[i];
+        int id = longDictionaryContent.get(v);
+        if (id == -1) {
+          id = dictionaryValues.size();
+          longDictionaryContent.put(v, id);
+          dictionaryValues.add(v);
+          dictionaryByteSize += 8;
+        }
+        encodedValues.add(id);
+      }
     }
 
     @Override
@@ -428,6 +476,21 @@ public abstract class DictionaryValuesWriter extends ValuesWriter implements Req
     }
 
     @Override
+    public void writeDoubles(double[] values, int offset, int length) {
+      for (int i = offset; i < offset + length; i++) {
+        double v = values[i];
+        int id = doubleDictionaryContent.get(v);
+        if (id == -1) {
+          id = dictionaryValues.size();
+          doubleDictionaryContent.put(v, id);
+          dictionaryValues.add(v);
+          dictionaryByteSize += 8;
+        }
+        encodedValues.add(id);
+      }
+    }
+
+    @Override
     public DictionaryPage toDictPageAndClose() {
       if (lastUsedDictionarySize > 0) {
         // return a dictionary only if we actually used it
@@ -492,6 +555,21 @@ public abstract class DictionaryValuesWriter extends ValuesWriter implements Req
     }
 
     @Override
+    public void writeIntegers(int[] values, int offset, int length) {
+      for (int i = offset; i < offset + length; i++) {
+        int v = values[i];
+        int id = intDictionaryContent.get(v);
+        if (id == -1) {
+          id = dictionaryValues.size();
+          intDictionaryContent.put(v, id);
+          dictionaryValues.add(v);
+          dictionaryByteSize += 4;
+        }
+        encodedValues.add(id);
+      }
+    }
+
+    @Override
     public DictionaryPage toDictPageAndClose() {
       if (lastUsedDictionarySize > 0) {
         // return a dictionary only if we actually used it
@@ -553,6 +631,21 @@ public abstract class DictionaryValuesWriter extends ValuesWriter implements Req
         dictionaryByteSize += 4;
       }
       encodedValues.add(id);
+    }
+
+    @Override
+    public void writeFloats(float[] values, int offset, int length) {
+      for (int i = offset; i < offset + length; i++) {
+        float v = values[i];
+        int id = floatDictionaryContent.get(v);
+        if (id == -1) {
+          id = dictionaryValues.size();
+          floatDictionaryContent.put(v, id);
+          dictionaryValues.add(v);
+          dictionaryByteSize += 4;
+        }
+        encodedValues.add(id);
+      }
     }
 
     @Override

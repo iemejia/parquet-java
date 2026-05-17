@@ -43,12 +43,16 @@ import org.apache.parquet.column.values.ValuesReader;
 import org.apache.parquet.column.values.ValuesWriter;
 import org.apache.parquet.column.values.dictionary.DictionaryValuesWriter.PlainBinaryDictionaryValuesWriter;
 import org.apache.parquet.column.values.dictionary.DictionaryValuesWriter.PlainDoubleDictionaryValuesWriter;
+import org.apache.parquet.column.values.dictionary.DictionaryValuesWriter.PlainFixedLenArrayDictionaryValuesWriter;
 import org.apache.parquet.column.values.dictionary.DictionaryValuesWriter.PlainFloatDictionaryValuesWriter;
 import org.apache.parquet.column.values.dictionary.DictionaryValuesWriter.PlainIntegerDictionaryValuesWriter;
 import org.apache.parquet.column.values.dictionary.DictionaryValuesWriter.PlainLongDictionaryValuesWriter;
+import org.apache.parquet.column.values.dictionary.PlainValuesDictionary.PlainBinaryDictionary;
 import org.apache.parquet.column.values.dictionary.PlainValuesDictionary.PlainBooleanDictionary;
 import org.apache.parquet.column.values.fallback.FallbackValuesWriter;
 import org.apache.parquet.column.values.plain.BinaryPlainValuesReader;
+import org.apache.parquet.column.values.plain.BooleanPlainValuesReader;
+import org.apache.parquet.column.values.plain.BooleanPlainValuesWriter;
 import org.apache.parquet.column.values.plain.PlainValuesReader;
 import org.apache.parquet.column.values.plain.PlainValuesWriter;
 import org.apache.parquet.io.api.Binary;
@@ -745,6 +749,825 @@ public class TestDictionary {
     assertEquals(true, dictionary.decodeToBoolean(0));
     assertEquals(false, dictionary.decodeToBoolean(1));
     assertEquals(1, dictionary.getMaxId());
+  }
+
+  // ==== Batch round-trip tests ====
+
+  @Test
+  public void testBatchIntDictionaryRoundTrip() throws IOException {
+    int COUNT = 2000;
+    int DISTINCT = 50;
+    try (PlainIntegerDictionaryValuesWriter cw = new PlainIntegerDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      int[] data = new int[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = i % DISTINCT;
+      }
+
+      cw.writeIntegers(data, 0, COUNT);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+      assertEquals(DISTINCT, cw.getDictionarySize());
+
+      DictionaryValuesReader cr = initDicReader(cw, INT32);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      int[] result = new int[COUNT];
+      cr.readIntegers(result, 0, COUNT);
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], result[i]);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchLongDictionaryRoundTrip() throws IOException {
+    int COUNT = 1000;
+    int DISTINCT = 50;
+    try (PlainLongDictionaryValuesWriter cw = new PlainLongDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      long[] data = new long[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = i % DISTINCT;
+      }
+
+      cw.writeLongs(data, 0, COUNT);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+      assertEquals(DISTINCT, cw.getDictionarySize());
+
+      DictionaryValuesReader cr = initDicReader(cw, PrimitiveTypeName.INT64);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      long[] result = new long[COUNT];
+      cr.readLongs(result, 0, COUNT);
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], result[i]);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchFloatDictionaryRoundTrip() throws IOException {
+    int COUNT = 2000;
+    int DISTINCT = 50;
+    try (PlainFloatDictionaryValuesWriter cw = new PlainFloatDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      float[] data = new float[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = i % DISTINCT;
+      }
+
+      cw.writeFloats(data, 0, COUNT);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+      assertEquals(DISTINCT, cw.getDictionarySize());
+
+      DictionaryValuesReader cr = initDicReader(cw, FLOAT);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      float[] result = new float[COUNT];
+      cr.readFloats(result, 0, COUNT);
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], result[i], 0.0f);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchDoubleDictionaryRoundTrip() throws IOException {
+    int COUNT = 1000;
+    int DISTINCT = 50;
+    try (PlainDoubleDictionaryValuesWriter cw = new PlainDoubleDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      double[] data = new double[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = i % DISTINCT;
+      }
+
+      cw.writeDoubles(data, 0, COUNT);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+      assertEquals(DISTINCT, cw.getDictionarySize());
+
+      DictionaryValuesReader cr = initDicReader(cw, DOUBLE);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      double[] result = new double[COUNT];
+      cr.readDoubles(result, 0, COUNT);
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], result[i], 0.0);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchBinaryDictionaryRoundTrip() throws IOException {
+    int COUNT = 100;
+    int DISTINCT = 10;
+    try (PlainBinaryDictionaryValuesWriter cw = new PlainBinaryDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      Binary[] data = new Binary[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = Binary.fromString("str" + (i % DISTINCT));
+      }
+
+      cw.writeBinaries(data, 0, COUNT);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+      assertEquals(DISTINCT, cw.getDictionarySize());
+
+      DictionaryValuesReader cr = initDicReader(cw, BINARY);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      Binary[] result = new Binary[COUNT];
+      cr.readBinaries(result, 0, COUNT);
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], result[i]);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchFixedLenBinaryDictionaryRoundTrip() throws IOException {
+    int COUNT = 100;
+    int DISTINCT = 10;
+    int FIXED_LENGTH = 4;
+    try (PlainFixedLenArrayDictionaryValuesWriter cw = new PlainFixedLenArrayDictionaryValuesWriter(
+        10000, FIXED_LENGTH, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      Binary[] data = new Binary[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = Binary.fromConstantByteArray(
+            String.format("%04d", i % DISTINCT).getBytes(StandardCharsets.UTF_8));
+      }
+
+      cw.writeBinaries(data, 0, COUNT);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+      assertEquals(DISTINCT, cw.getDictionarySize());
+
+      // For FLBA, create dictionary directly with fixed length
+      DictionaryPage dictPage = cw.toDictPageAndClose().copy();
+      Dictionary dictionary = new PlainBinaryDictionary(dictPage, FIXED_LENGTH);
+      DictionaryValuesReader cr = new DictionaryValuesReader(dictionary);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      Binary[] result = new Binary[COUNT];
+      cr.readBinaries(result, 0, COUNT);
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], result[i]);
+      }
+    }
+  }
+
+  // ==== Cross-compatibility: batch write + scalar read, scalar write + batch read ====
+  // These independently validate each side against the known-good scalar path.
+
+  @Test
+  public void testBatchWriteScalarReadIntDictionary() throws IOException {
+    int COUNT = 200;
+    int DISTINCT = 50;
+    try (PlainIntegerDictionaryValuesWriter cw = new PlainIntegerDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      int[] data = new int[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = i % DISTINCT;
+      }
+
+      cw.writeIntegers(data, 0, COUNT);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, INT32);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], cr.readInteger());
+      }
+    }
+  }
+
+  @Test
+  public void testScalarWriteBatchReadIntDictionary() throws IOException {
+    int COUNT = 200;
+    int DISTINCT = 50;
+    try (PlainIntegerDictionaryValuesWriter cw = new PlainIntegerDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      int[] data = new int[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = i % DISTINCT;
+        cw.writeInteger(data[i]);
+      }
+
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, INT32);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      int[] result = new int[COUNT];
+      cr.readIntegers(result, 0, COUNT);
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], result[i]);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchWriteScalarReadLongDictionary() throws IOException {
+    int COUNT = 200;
+    int DISTINCT = 50;
+    try (PlainLongDictionaryValuesWriter cw = new PlainLongDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      long[] data = new long[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = i % DISTINCT;
+      }
+
+      cw.writeLongs(data, 0, COUNT);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, PrimitiveTypeName.INT64);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], cr.readLong());
+      }
+    }
+  }
+
+  @Test
+  public void testScalarWriteBatchReadLongDictionary() throws IOException {
+    int COUNT = 200;
+    int DISTINCT = 50;
+    try (PlainLongDictionaryValuesWriter cw = new PlainLongDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      long[] data = new long[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = i % DISTINCT;
+        cw.writeLong(data[i]);
+      }
+
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, PrimitiveTypeName.INT64);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      long[] result = new long[COUNT];
+      cr.readLongs(result, 0, COUNT);
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], result[i]);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchWriteScalarReadFloatDictionary() throws IOException {
+    int COUNT = 200;
+    int DISTINCT = 50;
+    try (PlainFloatDictionaryValuesWriter cw = new PlainFloatDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      float[] data = new float[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = i % DISTINCT;
+      }
+
+      cw.writeFloats(data, 0, COUNT);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, FLOAT);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], cr.readFloat(), 0.0f);
+      }
+    }
+  }
+
+  @Test
+  public void testScalarWriteBatchReadFloatDictionary() throws IOException {
+    int COUNT = 200;
+    int DISTINCT = 50;
+    try (PlainFloatDictionaryValuesWriter cw = new PlainFloatDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      float[] data = new float[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = i % DISTINCT;
+        cw.writeFloat(data[i]);
+      }
+
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, FLOAT);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      float[] result = new float[COUNT];
+      cr.readFloats(result, 0, COUNT);
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], result[i], 0.0f);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchWriteScalarReadDoubleDictionary() throws IOException {
+    int COUNT = 200;
+    int DISTINCT = 50;
+    try (PlainDoubleDictionaryValuesWriter cw = new PlainDoubleDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      double[] data = new double[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = i % DISTINCT;
+      }
+
+      cw.writeDoubles(data, 0, COUNT);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, DOUBLE);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], cr.readDouble(), 0.0);
+      }
+    }
+  }
+
+  @Test
+  public void testScalarWriteBatchReadDoubleDictionary() throws IOException {
+    int COUNT = 200;
+    int DISTINCT = 50;
+    try (PlainDoubleDictionaryValuesWriter cw = new PlainDoubleDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      double[] data = new double[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = i % DISTINCT;
+        cw.writeDouble(data[i]);
+      }
+
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, DOUBLE);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      double[] result = new double[COUNT];
+      cr.readDoubles(result, 0, COUNT);
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], result[i], 0.0);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchWriteScalarReadBinaryDictionary() throws IOException {
+    int COUNT = 100;
+    int DISTINCT = 10;
+    try (PlainBinaryDictionaryValuesWriter cw = new PlainBinaryDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      Binary[] data = new Binary[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = Binary.fromString("str" + (i % DISTINCT));
+      }
+
+      cw.writeBinaries(data, 0, COUNT);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, BINARY);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], cr.readBytes());
+      }
+    }
+  }
+
+  @Test
+  public void testScalarWriteBatchReadBinaryDictionary() throws IOException {
+    int COUNT = 100;
+    int DISTINCT = 10;
+    try (PlainBinaryDictionaryValuesWriter cw = new PlainBinaryDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      Binary[] data = new Binary[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = Binary.fromString("str" + (i % DISTINCT));
+        cw.writeBytes(data[i]);
+      }
+
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, BINARY);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      Binary[] result = new Binary[COUNT];
+      cr.readBinaries(result, 0, COUNT);
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], result[i]);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchWriteScalarReadFlbaDictionary() throws IOException {
+    int COUNT = 100;
+    int DISTINCT = 10;
+    int FIXED_LENGTH = 4;
+    try (PlainFixedLenArrayDictionaryValuesWriter cw = new PlainFixedLenArrayDictionaryValuesWriter(
+        10000, FIXED_LENGTH, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      Binary[] data = new Binary[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = Binary.fromConstantByteArray(
+            String.format("%04d", i % DISTINCT).getBytes(StandardCharsets.UTF_8));
+      }
+
+      cw.writeBinaries(data, 0, COUNT);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryPage dictPage = cw.toDictPageAndClose().copy();
+      Dictionary dictionary = new PlainBinaryDictionary(dictPage, FIXED_LENGTH);
+      DictionaryValuesReader cr = new DictionaryValuesReader(dictionary);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], cr.readBytes());
+      }
+    }
+  }
+
+  @Test
+  public void testScalarWriteBatchReadFlbaDictionary() throws IOException {
+    int COUNT = 100;
+    int DISTINCT = 10;
+    int FIXED_LENGTH = 4;
+    try (PlainFixedLenArrayDictionaryValuesWriter cw = new PlainFixedLenArrayDictionaryValuesWriter(
+        10000, FIXED_LENGTH, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      Binary[] data = new Binary[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = Binary.fromConstantByteArray(
+            String.format("%04d", i % DISTINCT).getBytes(StandardCharsets.UTF_8));
+        cw.writeBytes(data[i]);
+      }
+
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryPage dictPage = cw.toDictPageAndClose().copy();
+      Dictionary dictionary = new PlainBinaryDictionary(dictPage, FIXED_LENGTH);
+      DictionaryValuesReader cr = new DictionaryValuesReader(dictionary);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      Binary[] result = new Binary[COUNT];
+      cr.readBinaries(result, 0, COUNT);
+      for (int i = 0; i < COUNT; i++) {
+        assertEquals(data[i], result[i]);
+      }
+    }
+  }
+
+  // ==== Offset parameter tests ====
+
+  @Test
+  public void testBatchWriteWithOffsetInt() throws IOException {
+    int TOTAL = 200;
+    int OFFSET = 50;
+    int LENGTH = 100;
+    int DISTINCT = 20;
+    try (PlainIntegerDictionaryValuesWriter cw = new PlainIntegerDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      int[] data = new int[TOTAL];
+      for (int i = 0; i < TOTAL; i++) {
+        data[i] = i % DISTINCT;
+      }
+
+      cw.writeIntegers(data, OFFSET, LENGTH);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, INT32);
+      cr.initFromPage(LENGTH, bytes.toInputStream());
+      int[] result = new int[LENGTH];
+      cr.readIntegers(result, 0, LENGTH);
+      for (int i = 0; i < LENGTH; i++) {
+        assertEquals(data[OFFSET + i], result[i]);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchReadWithOffsetInt() throws IOException {
+    int COUNT = 100;
+    int DISTINCT = 20;
+    try (PlainIntegerDictionaryValuesWriter cw = new PlainIntegerDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      int[] data = new int[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = i % DISTINCT;
+        cw.writeInteger(data[i]);
+      }
+
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, INT32);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      int[] result = new int[COUNT + 10];
+      cr.readIntegers(result, 5, 50);
+      cr.readIntegers(result, 60, 50);
+      for (int i = 0; i < 50; i++) {
+        assertEquals(data[i], result[5 + i]);
+      }
+      for (int i = 0; i < 50; i++) {
+        assertEquals(data[50 + i], result[60 + i]);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchWriteWithOffsetLong() throws IOException {
+    int TOTAL = 200;
+    int OFFSET = 50;
+    int LENGTH = 100;
+    int DISTINCT = 20;
+    try (PlainLongDictionaryValuesWriter cw = new PlainLongDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      long[] data = new long[TOTAL];
+      for (int i = 0; i < TOTAL; i++) {
+        data[i] = i % DISTINCT;
+      }
+
+      cw.writeLongs(data, OFFSET, LENGTH);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, PrimitiveTypeName.INT64);
+      cr.initFromPage(LENGTH, bytes.toInputStream());
+      long[] result = new long[LENGTH];
+      cr.readLongs(result, 0, LENGTH);
+      for (int i = 0; i < LENGTH; i++) {
+        assertEquals(data[OFFSET + i], result[i]);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchReadWithOffsetLong() throws IOException {
+    int COUNT = 100;
+    int DISTINCT = 20;
+    try (PlainLongDictionaryValuesWriter cw = new PlainLongDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      long[] data = new long[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = i % DISTINCT;
+        cw.writeLong(data[i]);
+      }
+
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, PrimitiveTypeName.INT64);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      long[] result = new long[COUNT + 10];
+      cr.readLongs(result, 5, 50);
+      cr.readLongs(result, 60, 50);
+      for (int i = 0; i < 50; i++) {
+        assertEquals(data[i], result[5 + i]);
+      }
+      for (int i = 0; i < 50; i++) {
+        assertEquals(data[50 + i], result[60 + i]);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchWriteWithOffsetFloat() throws IOException {
+    int TOTAL = 200;
+    int OFFSET = 50;
+    int LENGTH = 100;
+    int DISTINCT = 20;
+    try (PlainFloatDictionaryValuesWriter cw = new PlainFloatDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      float[] data = new float[TOTAL];
+      for (int i = 0; i < TOTAL; i++) {
+        data[i] = i % DISTINCT;
+      }
+
+      cw.writeFloats(data, OFFSET, LENGTH);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, FLOAT);
+      cr.initFromPage(LENGTH, bytes.toInputStream());
+      float[] result = new float[LENGTH];
+      cr.readFloats(result, 0, LENGTH);
+      for (int i = 0; i < LENGTH; i++) {
+        assertEquals(data[OFFSET + i], result[i], 0.0f);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchReadWithOffsetFloat() throws IOException {
+    int COUNT = 100;
+    int DISTINCT = 20;
+    try (PlainFloatDictionaryValuesWriter cw = new PlainFloatDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      float[] data = new float[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = i % DISTINCT;
+        cw.writeFloat(data[i]);
+      }
+
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, FLOAT);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      float[] result = new float[COUNT + 10];
+      cr.readFloats(result, 5, 50);
+      cr.readFloats(result, 60, 50);
+      for (int i = 0; i < 50; i++) {
+        assertEquals(data[i], result[5 + i], 0.0f);
+      }
+      for (int i = 0; i < 50; i++) {
+        assertEquals(data[50 + i], result[60 + i], 0.0f);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchWriteWithOffsetDouble() throws IOException {
+    int TOTAL = 200;
+    int OFFSET = 50;
+    int LENGTH = 100;
+    int DISTINCT = 20;
+    try (PlainDoubleDictionaryValuesWriter cw = new PlainDoubleDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      double[] data = new double[TOTAL];
+      for (int i = 0; i < TOTAL; i++) {
+        data[i] = i % DISTINCT;
+      }
+
+      cw.writeDoubles(data, OFFSET, LENGTH);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, DOUBLE);
+      cr.initFromPage(LENGTH, bytes.toInputStream());
+      double[] result = new double[LENGTH];
+      cr.readDoubles(result, 0, LENGTH);
+      for (int i = 0; i < LENGTH; i++) {
+        assertEquals(data[OFFSET + i], result[i], 0.0);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchReadWithOffsetDouble() throws IOException {
+    int COUNT = 100;
+    int DISTINCT = 20;
+    try (PlainDoubleDictionaryValuesWriter cw = new PlainDoubleDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      double[] data = new double[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = i % DISTINCT;
+        cw.writeDouble(data[i]);
+      }
+
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, DOUBLE);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      double[] result = new double[COUNT + 10];
+      cr.readDoubles(result, 5, 50);
+      cr.readDoubles(result, 60, 50);
+      for (int i = 0; i < 50; i++) {
+        assertEquals(data[i], result[5 + i], 0.0);
+      }
+      for (int i = 0; i < 50; i++) {
+        assertEquals(data[50 + i], result[60 + i], 0.0);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchWriteWithOffsetBinary() throws IOException {
+    int TOTAL = 200;
+    int OFFSET = 50;
+    int LENGTH = 100;
+    int DISTINCT = 20;
+    try (PlainBinaryDictionaryValuesWriter cw = new PlainBinaryDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      Binary[] data = new Binary[TOTAL];
+      for (int i = 0; i < TOTAL; i++) {
+        data[i] = Binary.fromString("val" + (i % DISTINCT));
+      }
+
+      cw.writeBinaries(data, OFFSET, LENGTH);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, BINARY);
+      cr.initFromPage(LENGTH, bytes.toInputStream());
+      Binary[] result = new Binary[LENGTH];
+      cr.readBinaries(result, 0, LENGTH);
+      for (int i = 0; i < LENGTH; i++) {
+        assertEquals(data[OFFSET + i], result[i]);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchReadWithOffsetBinary() throws IOException {
+    int COUNT = 100;
+    int DISTINCT = 20;
+    try (PlainBinaryDictionaryValuesWriter cw = new PlainBinaryDictionaryValuesWriter(
+        10000, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      Binary[] data = new Binary[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = Binary.fromString("val" + (i % DISTINCT));
+        cw.writeBytes(data[i]);
+      }
+
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryValuesReader cr = initDicReader(cw, BINARY);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      Binary[] result = new Binary[COUNT + 10];
+      cr.readBinaries(result, 5, 50);
+      cr.readBinaries(result, 60, 50);
+      for (int i = 0; i < 50; i++) {
+        assertEquals(data[i], result[5 + i]);
+      }
+      for (int i = 0; i < 50; i++) {
+        assertEquals(data[50 + i], result[60 + i]);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchWriteWithOffsetFlba() throws IOException {
+    int TOTAL = 200;
+    int OFFSET = 50;
+    int LENGTH = 100;
+    int DISTINCT = 20;
+    int FIXED_LENGTH = 4;
+    try (PlainFixedLenArrayDictionaryValuesWriter cw = new PlainFixedLenArrayDictionaryValuesWriter(
+        10000, FIXED_LENGTH, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      Binary[] data = new Binary[TOTAL];
+      for (int i = 0; i < TOTAL; i++) {
+        data[i] = Binary.fromConstantByteArray(
+            String.format("%04d", i % DISTINCT).getBytes(StandardCharsets.UTF_8));
+      }
+
+      cw.writeBinaries(data, OFFSET, LENGTH);
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryPage dictPage = cw.toDictPageAndClose().copy();
+      Dictionary dictionary = new PlainBinaryDictionary(dictPage, FIXED_LENGTH);
+      DictionaryValuesReader cr = new DictionaryValuesReader(dictionary);
+      cr.initFromPage(LENGTH, bytes.toInputStream());
+      Binary[] result = new Binary[LENGTH];
+      cr.readBinaries(result, 0, LENGTH);
+      for (int i = 0; i < LENGTH; i++) {
+        assertEquals(data[OFFSET + i], result[i]);
+      }
+    }
+  }
+
+  @Test
+  public void testBatchReadWithOffsetFlba() throws IOException {
+    int COUNT = 100;
+    int DISTINCT = 20;
+    int FIXED_LENGTH = 4;
+    try (PlainFixedLenArrayDictionaryValuesWriter cw = new PlainFixedLenArrayDictionaryValuesWriter(
+        10000, FIXED_LENGTH, PLAIN_DICTIONARY, PLAIN_DICTIONARY, allocator)) {
+      Binary[] data = new Binary[COUNT];
+      for (int i = 0; i < COUNT; i++) {
+        data[i] = Binary.fromConstantByteArray(
+            String.format("%04d", i % DISTINCT).getBytes(StandardCharsets.UTF_8));
+        cw.writeBytes(data[i]);
+      }
+
+      BytesInput bytes = getBytesAndCheckEncoding(cw, PLAIN_DICTIONARY);
+
+      DictionaryPage dictPage = cw.toDictPageAndClose().copy();
+      Dictionary dictionary = new PlainBinaryDictionary(dictPage, FIXED_LENGTH);
+      DictionaryValuesReader cr = new DictionaryValuesReader(dictionary);
+      cr.initFromPage(COUNT, bytes.toInputStream());
+      Binary[] result = new Binary[COUNT + 10];
+      cr.readBinaries(result, 5, 50);
+      cr.readBinaries(result, 60, 50);
+      for (int i = 0; i < 50; i++) {
+        assertEquals(data[i], result[5 + i]);
+      }
+      for (int i = 0; i < 50; i++) {
+        assertEquals(data[50 + i], result[60 + i]);
+      }
+    }
+  }
+
+  // ==== Base-class batch default tests (writeBooleans / readBooleans) ====
+
+  @Test
+  public void testBatchBooleanPlainRoundTrip() throws IOException {
+    int COUNT = 200;
+    int OFFSET = 10;
+    int LENGTH = 100;
+    boolean[] data = new boolean[COUNT];
+    for (int i = 0; i < COUNT; i++) {
+      data[i] = (i % 3) != 0;
+    }
+
+    // Test full-array batch write + batch read (exercises ValuesWriter.writeBooleans default)
+    BooleanPlainValuesWriter w = new BooleanPlainValuesWriter();
+    w.writeBooleans(data, 0, COUNT);
+    BytesInput bytes = BytesInput.copy(w.getBytes());
+    w.close();
+
+    BooleanPlainValuesReader r = new BooleanPlainValuesReader();
+    r.initFromPage(COUNT, bytes.toInputStream());
+    boolean[] result = new boolean[COUNT];
+    r.readBooleans(result, 0, COUNT);
+    for (int i = 0; i < COUNT; i++) {
+      assertEquals("mismatch at index " + i, data[i], result[i]);
+    }
+
+    // Test offset write + offset read
+    w = new BooleanPlainValuesWriter();
+    w.writeBooleans(data, OFFSET, LENGTH);
+    bytes = BytesInput.copy(w.getBytes());
+    w.close();
+
+    r = new BooleanPlainValuesReader();
+    r.initFromPage(LENGTH, bytes.toInputStream());
+    boolean[] offsetResult = new boolean[LENGTH + 20];
+    r.readBooleans(offsetResult, 5, LENGTH);
+    for (int i = 0; i < LENGTH; i++) {
+      assertEquals("offset mismatch at index " + i, data[OFFSET + i], offsetResult[5 + i]);
+    }
   }
 
   private DictionaryValuesReader initDicReader(ValuesWriter cw, PrimitiveTypeName type) throws IOException {
