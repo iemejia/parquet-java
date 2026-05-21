@@ -372,9 +372,11 @@ public abstract class AlpValuesWriter extends ValuesWriter {
       totalCount = 0;
       encodedVectors.reset();
       vectorByteSizes.clear();
-      vectorsProcessed = 0;
-      cachedPresets = null;
-      rowgroupSamples.clear();
+      // Preserve cachedPresets, rowgroupSamples, and vectorsProcessed across pages:
+      // data distribution is stable within a column chunk, so learned presets remain valid.
+      // This avoids repeating the expensive brute-force (e,f) search on every page.
+      // At row-group boundaries, the Parquet write path creates a new writer instance,
+      // so presets are naturally discarded without needing a separate "full reset".
     }
 
     @Override
@@ -677,9 +679,11 @@ public abstract class AlpValuesWriter extends ValuesWriter {
       totalCount = 0;
       encodedVectors.reset();
       vectorByteSizes.clear();
-      vectorsProcessed = 0;
-      cachedPresets = null;
-      rowgroupSamples.clear();
+      // Preserve cachedPresets, rowgroupSamples, and vectorsProcessed across pages:
+      // data distribution is stable within a column chunk, so learned presets remain valid.
+      // This avoids repeating the expensive brute-force (e,f) search on every page.
+      // At row-group boundaries, the Parquet write path creates a new writer instance,
+      // so presets are naturally discarded without needing a separate "full reset".
     }
 
     @Override

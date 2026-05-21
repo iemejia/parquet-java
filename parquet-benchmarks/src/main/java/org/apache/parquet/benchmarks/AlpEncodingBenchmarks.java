@@ -599,9 +599,11 @@ public class AlpEncodingBenchmarks {
     private double[] doubleData;
     private AlpValuesWriter.FloatAlpValuesWriter floatWriter;
     private AlpValuesWriter.DoubleAlpValuesWriter doubleWriter;
+    private ByteBuffer floatEncodedBuf;
+    private ByteBuffer doubleEncodedBuf;
 
     @Setup(Level.Trial)
-    public void setup() {
+    public void setup() throws IOException {
       Random rand = new Random(42);
       floatData = new float[NUM_VALUES];
       doubleData = new double[NUM_VALUES];
@@ -628,6 +630,15 @@ public class AlpEncodingBenchmarks {
           new AlpValuesWriter.FloatAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
       doubleWriter =
           new AlpValuesWriter.DoubleAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+
+      // Pre-encode for decode benchmarks (encode cost excluded from decode measurement)
+      for (float v : floatData) floatWriter.writeFloat(v);
+      floatEncodedBuf = floatWriter.getBytes().toByteBuffer();
+      floatWriter.reset();
+
+      for (double v : doubleData) doubleWriter.writeDouble(v);
+      doubleEncodedBuf = doubleWriter.getBytes().toByteBuffer();
+      doubleWriter.reset();
     }
 
     @TearDown(Level.Trial)
@@ -656,21 +667,17 @@ public class AlpEncodingBenchmarks {
 
     @Benchmark
     public void decodeFloat(Blackhole bh) throws IOException {
-      floatWriter.reset();
-      for (float v : floatData) floatWriter.writeFloat(v);
-      ByteBuffer buf = floatWriter.getBytes().toByteBuffer();
       AlpValuesReaderForFloat reader = new AlpValuesReaderForFloat();
-      reader.initFromPage(NUM_VALUES, ByteBufferInputStream.wrap(buf));
+      floatEncodedBuf.rewind();
+      reader.initFromPage(NUM_VALUES, ByteBufferInputStream.wrap(floatEncodedBuf));
       for (int i = 0; i < NUM_VALUES; i++) bh.consume(reader.readFloat());
     }
 
     @Benchmark
     public void decodeDouble(Blackhole bh) throws IOException {
-      doubleWriter.reset();
-      for (double v : doubleData) doubleWriter.writeDouble(v);
-      ByteBuffer buf = doubleWriter.getBytes().toByteBuffer();
       AlpValuesReaderForDouble reader = new AlpValuesReaderForDouble();
-      reader.initFromPage(NUM_VALUES, ByteBufferInputStream.wrap(buf));
+      doubleEncodedBuf.rewind();
+      reader.initFromPage(NUM_VALUES, ByteBufferInputStream.wrap(doubleEncodedBuf));
       for (int i = 0; i < NUM_VALUES; i++) bh.consume(reader.readDouble());
     }
   }
