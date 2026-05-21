@@ -63,14 +63,11 @@ public class AlpValuesEndToEndTest {
         float expected = values[i];
         float actual = reader.readFloat();
 
-        if (Float.isNaN(expected)) {
-          assertTrue("Expected NaN at index " + i, Float.isNaN(actual));
-        } else {
-          assertEquals(
-              "Value mismatch at index " + i + " for " + expected,
-              Float.floatToRawIntBits(expected),
-              Float.floatToRawIntBits(actual));
-        }
+        assertEquals(
+            "Value mismatch at index " + i + " for " + expected
+                + " (bits: 0x" + Integer.toHexString(Float.floatToRawIntBits(expected)) + ")",
+            Float.floatToRawIntBits(expected),
+            Float.floatToRawIntBits(actual));
       }
     } finally {
       if (writer != null) {
@@ -103,14 +100,11 @@ public class AlpValuesEndToEndTest {
         double expected = values[i];
         double actual = reader.readDouble();
 
-        if (Double.isNaN(expected)) {
-          assertTrue("Expected NaN at index " + i, Double.isNaN(actual));
-        } else {
-          assertEquals(
-              "Value mismatch at index " + i + " for " + expected,
-              Double.doubleToRawLongBits(expected),
-              Double.doubleToRawLongBits(actual));
-        }
+        assertEquals(
+            "Value mismatch at index " + i + " for " + expected
+                + " (bits: 0x" + Long.toHexString(Double.doubleToRawLongBits(expected)) + ")",
+            Double.doubleToRawLongBits(expected),
+            Double.doubleToRawLongBits(actual));
       }
     } finally {
       if (writer != null) {
