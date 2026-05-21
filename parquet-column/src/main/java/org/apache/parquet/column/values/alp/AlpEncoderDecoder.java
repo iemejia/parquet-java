@@ -177,6 +177,10 @@ final class AlpEncoderDecoder {
    * where bitWidth is the number of bits needed to represent the unsigned range of non-exception
    * encoded values after frame-of-reference subtraction. This matches the C++ ALP cost model and
    * produces better compression ratios than minimizing exception count alone.
+   *
+   * <p>Optimized inner loop: hoists POW10 constants, inlines round-trip check, and uses a unified
+   * range check that naturally rejects NaN/Inf/out-of-range without needing a separate pre-filter
+   * or early floatToRawIntBits conversion (which would force XMM→GPR register moves per value).
    */
   static EncodingParams findBestFloatParams(float[] values, int offset, int length) {
     int bestExponent = 0;
@@ -186,19 +190,47 @@ final class AlpEncoderDecoder {
 
     for (int e = 0; e <= FLOAT_MAX_EXPONENT; e++) {
       for (int f = 0; f <= e; f++) {
+        // Hoist all constants out of the per-value loop
+        float pow10e = FLOAT_POW10[e];
+        float pow10nf = FLOAT_POW10_NEGATIVE[f];
+        float pow10f = FLOAT_POW10[f];
+        float pow10ne = FLOAT_POW10_NEGATIVE[e];
+
         int exceptions = 0;
         int minEncoded = Integer.MAX_VALUE;
         int maxEncoded = Integer.MIN_VALUE;
+
         for (int i = 0; i < length; i++) {
           float value = values[offset + i];
-          if (isFloatException(value, e, f)) {
+
+          // Unified range check: after scaling, reject if out of encodeable range.
+          // This naturally catches NaN (NaN comparisons are always false, so the
+          // negated condition triggers), Inf (Inf > UPPER), and out-of-range values.
+          // -0.0 passes through but is caught by the round-trip check below since
+          // encode(-0.0) = 0 → decode(0) = +0.0 ≠ -0.0 in raw bits.
+          float scaled = value * pow10e * pow10nf;
+          if (!(scaled >= FLOAT_ENCODING_LOWER_LIMIT && scaled <= FLOAT_ENCODING_UPPER_LIMIT)) {
+            exceptions++;
+            continue;
+          }
+
+          int encoded;
+          if (scaled >= 0) {
+            encoded = (int) ((scaled + MAGIC_FLOAT) - MAGIC_FLOAT);
+          } else {
+            encoded = (int) ((scaled - MAGIC_FLOAT) + MAGIC_FLOAT);
+          }
+
+          // Round-trip decode check (only converts to bits here, after all float work)
+          float decoded = encoded * pow10f * pow10ne;
+          if (Float.floatToRawIntBits(value) != Float.floatToRawIntBits(decoded)) {
             exceptions++;
           } else {
-            int encoded = encodeFloat(value, e, f);
             if (encoded < minEncoded) minEncoded = encoded;
             if (encoded > maxEncoded) maxEncoded = encoded;
           }
         }
+
         int nonExceptions = length - exceptions;
         if (nonExceptions == 0) continue;
         long delta = (nonExceptions < 2) ? 0 :
@@ -232,19 +264,37 @@ final class AlpEncoderDecoder {
     for (int[] preset : presets) {
       int e = preset[0];
       int f = preset[1];
+      float pow10e = FLOAT_POW10[e];
+      float pow10nf = FLOAT_POW10_NEGATIVE[f];
+      float pow10f = FLOAT_POW10[f];
+      float pow10ne = FLOAT_POW10_NEGATIVE[e];
+
       int exceptions = 0;
       int minEncoded = Integer.MAX_VALUE;
       int maxEncoded = Integer.MIN_VALUE;
+
       for (int i = 0; i < length; i++) {
         float value = values[offset + i];
-        if (isFloatException(value, e, f)) {
+        float scaled = value * pow10e * pow10nf;
+        if (!(scaled >= FLOAT_ENCODING_LOWER_LIMIT && scaled <= FLOAT_ENCODING_UPPER_LIMIT)) {
+          exceptions++;
+          continue;
+        }
+        int encoded;
+        if (scaled >= 0) {
+          encoded = (int) ((scaled + MAGIC_FLOAT) - MAGIC_FLOAT);
+        } else {
+          encoded = (int) ((scaled - MAGIC_FLOAT) + MAGIC_FLOAT);
+        }
+        float decoded = encoded * pow10f * pow10ne;
+        if (Float.floatToRawIntBits(value) != Float.floatToRawIntBits(decoded)) {
           exceptions++;
         } else {
-          int encoded = encodeFloat(value, e, f);
           if (encoded < minEncoded) minEncoded = encoded;
           if (encoded > maxEncoded) maxEncoded = encoded;
         }
       }
+
       int nonExceptions = length - exceptions;
       if (nonExceptions == 0) continue;
       long delta = (nonExceptions < 2) ? 0 :
@@ -267,7 +317,10 @@ final class AlpEncoderDecoder {
     return new EncodingParams(bestExponent, bestFactor, bestExceptions);
   }
 
-  /** Try all (exponent, factor) combos and pick the one with the smallest estimated compressed size. */
+  /**
+   * Try all (exponent, factor) combos and pick the one with the smallest estimated compressed size.
+   * Optimized: hoists constants, inlines round-trip check, uses unified range check for NaN/Inf/overflow.
+   */
   static EncodingParams findBestDoubleParams(double[] values, int offset, int length) {
     int bestExponent = 0;
     int bestFactor = 0;
@@ -276,23 +329,46 @@ final class AlpEncoderDecoder {
 
     for (int e = 0; e <= DOUBLE_MAX_EXPONENT; e++) {
       for (int f = 0; f <= e; f++) {
+        // Hoist constants out of the per-value loop
+        double pow10e = DOUBLE_POW10[e];
+        double pow10nf = DOUBLE_POW10_NEGATIVE[f];
+        double pow10f = DOUBLE_POW10[f];
+        double pow10ne = DOUBLE_POW10_NEGATIVE[e];
+
         int exceptions = 0;
         long minEncoded = Long.MAX_VALUE;
         long maxEncoded = Long.MIN_VALUE;
+
         for (int i = 0; i < length; i++) {
           double value = values[offset + i];
-          if (isDoubleException(value, e, f)) {
+
+          // Unified range check: catches NaN (comparison is false), Inf, and out-of-range.
+          // -0.0 passes through but fails the round-trip check below.
+          double scaled = value * pow10e * pow10nf;
+          if (!(scaled >= ENCODING_LOWER_LIMIT && scaled <= ENCODING_UPPER_LIMIT)) {
+            exceptions++;
+            continue;
+          }
+
+          long encoded;
+          if (scaled >= 0) {
+            encoded = (long) ((scaled + MAGIC_DOUBLE) - MAGIC_DOUBLE);
+          } else {
+            encoded = (long) ((scaled - MAGIC_DOUBLE) + MAGIC_DOUBLE);
+          }
+
+          // Inline round-trip decode check
+          double decoded = encoded * pow10f * pow10ne;
+          if (Double.doubleToRawLongBits(value) != Double.doubleToRawLongBits(decoded)) {
             exceptions++;
           } else {
-            long encoded = encodeDouble(value, e, f);
             if (encoded < minEncoded) minEncoded = encoded;
             if (encoded > maxEncoded) maxEncoded = encoded;
           }
         }
+
         int nonExceptions = length - exceptions;
         if (nonExceptions == 0) continue;
-        // delta as signed subtraction; Long.numberOfLeadingZeros handles the unsigned bit width
-        // correctly even when the subtraction overflows (large range → penalized with 64 bits).
         long delta = (nonExceptions < 2) ? 0 : (maxEncoded - minEncoded);
         int bitsPerValue = (delta == 0) ? 0 : (64 - Long.numberOfLeadingZeros(delta));
         long estimatedSize = (long) length * bitsPerValue
@@ -323,19 +399,37 @@ final class AlpEncoderDecoder {
     for (int[] preset : presets) {
       int e = preset[0];
       int f = preset[1];
+      double pow10e = DOUBLE_POW10[e];
+      double pow10nf = DOUBLE_POW10_NEGATIVE[f];
+      double pow10f = DOUBLE_POW10[f];
+      double pow10ne = DOUBLE_POW10_NEGATIVE[e];
+
       int exceptions = 0;
       long minEncoded = Long.MAX_VALUE;
       long maxEncoded = Long.MIN_VALUE;
+
       for (int i = 0; i < length; i++) {
         double value = values[offset + i];
-        if (isDoubleException(value, e, f)) {
+        double scaled = value * pow10e * pow10nf;
+        if (!(scaled >= ENCODING_LOWER_LIMIT && scaled <= ENCODING_UPPER_LIMIT)) {
+          exceptions++;
+          continue;
+        }
+        long encoded;
+        if (scaled >= 0) {
+          encoded = (long) ((scaled + MAGIC_DOUBLE) - MAGIC_DOUBLE);
+        } else {
+          encoded = (long) ((scaled - MAGIC_DOUBLE) + MAGIC_DOUBLE);
+        }
+        double decoded = encoded * pow10f * pow10ne;
+        if (Double.doubleToRawLongBits(value) != Double.doubleToRawLongBits(decoded)) {
           exceptions++;
         } else {
-          long encoded = encodeDouble(value, e, f);
           if (encoded < minEncoded) minEncoded = encoded;
           if (encoded > maxEncoded) maxEncoded = encoded;
         }
       }
+
       int nonExceptions = length - exceptions;
       if (nonExceptions == 0) continue;
       long delta = (nonExceptions < 2) ? 0 : (maxEncoded - minEncoded);

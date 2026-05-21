@@ -161,35 +161,73 @@ public abstract class AlpValuesWriter extends ValuesWriter {
         buildPresetCache();
       }
 
-      int excIdx = 0;
+      // Fused single pass: encode + exception detect + find min, all with hoisted constants
+      int e = params.exponent;
+      int f = params.factor;
+      float pow10e = FLOAT_POW10[e];
+      float pow10nf = FLOAT_POW10_NEGATIVE[f];
+      float pow10f = FLOAT_POW10[f];
+      float pow10ne = FLOAT_POW10_NEGATIVE[e];
 
-      // We need a valid encoded value to fill exception slots (placeholder).
-      // Any non-exception value works; it gets overwritten on decode.
+      int excIdx = 0;
+      int minValue = Integer.MAX_VALUE;
       int placeholder = 0;
+      boolean foundPlaceholder = false;
+
       for (int i = 0; i < vectorLen; i++) {
-        if (!AlpEncoderDecoder.isFloatException(vectorBuffer[i], params.exponent, params.factor)) {
-          placeholder = AlpEncoderDecoder.encodeFloat(vectorBuffer[i], params.exponent, params.factor);
-          break;
+        float value = vectorBuffer[i];
+        int valueBits = Float.floatToRawIntBits(value);
+
+        // Unconditional exceptions: NaN, Inf, -0.0
+        if (valueBits == FLOAT_NEGATIVE_ZERO_BITS || (valueBits & 0x7F800000) == 0x7F800000) {
+          excPosBuffer[excIdx] = (short) i;
+          excValBuffer[excIdx] = value;
+          excIdx++;
+          encodedBuffer[i] = 0; // temporary, will be filled with placeholder
+          continue;
+        }
+
+        // Inline encode
+        float scaled = value * pow10e * pow10nf;
+        int encoded;
+        if (scaled >= 0) {
+          encoded = (int) ((scaled + MAGIC_FLOAT) - MAGIC_FLOAT);
+        } else {
+          encoded = (int) ((scaled - MAGIC_FLOAT) + MAGIC_FLOAT);
+        }
+
+        // Inline round-trip check
+        float decoded = encoded * pow10f * pow10ne;
+        if (valueBits != Float.floatToRawIntBits(decoded)) {
+          excPosBuffer[excIdx] = (short) i;
+          excValBuffer[excIdx] = value;
+          excIdx++;
+          encodedBuffer[i] = 0; // temporary
+        } else {
+          encodedBuffer[i] = encoded;
+          if (!foundPlaceholder) {
+            placeholder = encoded;
+            foundPlaceholder = true;
+          }
+          if (encoded < minValue) minValue = encoded;
         }
       }
 
-      int minValue = Integer.MAX_VALUE;
-      for (int i = 0; i < vectorLen; i++) {
-        if (AlpEncoderDecoder.isFloatException(vectorBuffer[i], params.exponent, params.factor)) {
-          excPosBuffer[excIdx] = (short) i;
-          excValBuffer[excIdx] = vectorBuffer[i];
-          excIdx++;
-          encodedBuffer[i] = placeholder;
-        } else {
-          encodedBuffer[i] = AlpEncoderDecoder.encodeFloat(vectorBuffer[i], params.exponent, params.factor);
+      // Fill exception slots with placeholder (any non-exception encoded value works)
+      if (excIdx > 0) {
+        for (int i = 0; i < excIdx; i++) {
+          encodedBuffer[excPosBuffer[i] & 0xFFFF] = placeholder;
         }
-        if (encodedBuffer[i] < minValue) {
-          minValue = encodedBuffer[i];
-        }
+        // Include placeholder in min computation (it's a valid encoded value)
+        if (placeholder < minValue) minValue = placeholder;
+      }
+
+      // If ALL values are exceptions, minValue stays MAX_VALUE; use 0
+      if (!foundPlaceholder) {
+        minValue = 0;
       }
 
       // Subtract min so deltas start at 0, reducing bit width.
-      // The subtraction may wrap for large ranges but unsigned bits stay correct.
       int maxDelta = 0;
       for (int i = 0; i < vectorLen; i++) {
         encodedBuffer[i] = encodedBuffer[i] - minValue;
@@ -205,8 +243,8 @@ public abstract class AlpValuesWriter extends ValuesWriter {
       // AlpInfo: exponent(1) + factor(1) + numExceptions(2) — little-endian
       metadataBuf[0] = (byte) params.exponent;
       metadataBuf[1] = (byte) params.factor;
-      metadataBuf[2] = (byte) (params.numExceptions & 0xFF);
-      metadataBuf[3] = (byte) ((params.numExceptions >>> 8) & 0xFF);
+      metadataBuf[2] = (byte) (excIdx & 0xFF);
+      metadataBuf[3] = (byte) ((excIdx >>> 8) & 0xFF);
       encodedVectors.write(metadataBuf, 0, ALP_INFO_SIZE);
 
       // ForInfo: frameOfReference(4) + bitWidth(1) — little-endian
@@ -222,15 +260,15 @@ public abstract class AlpValuesWriter extends ValuesWriter {
       }
 
       // Exception positions then values, written as separate blocks
-      if (params.numExceptions > 0) {
-        for (int i = 0; i < params.numExceptions; i++) {
+      if (excIdx > 0) {
+        for (int i = 0; i < excIdx; i++) {
           int pos = excPosBuffer[i] & 0xFFFF;
           metadataBuf[0] = (byte) (pos & 0xFF);
           metadataBuf[1] = (byte) ((pos >>> 8) & 0xFF);
           encodedVectors.write(metadataBuf, 0, Short.BYTES);
         }
 
-        for (int i = 0; i < params.numExceptions; i++) {
+        for (int i = 0; i < excIdx; i++) {
           int bits = Float.floatToRawIntBits(excValBuffer[i]);
           metadataBuf[0] = (byte) (bits & 0xFF);
           metadataBuf[1] = (byte) ((bits >>> 8) & 0xFF);
@@ -430,28 +468,67 @@ public abstract class AlpValuesWriter extends ValuesWriter {
         buildPresetCache();
       }
 
+      // Fused single pass: encode + exception detect + find min, with hoisted constants
+      int e = params.exponent;
+      int f = params.factor;
+      double pow10e = DOUBLE_POW10[e];
+      double pow10nf = DOUBLE_POW10_NEGATIVE[f];
+      double pow10f = DOUBLE_POW10[f];
+      double pow10ne = DOUBLE_POW10_NEGATIVE[e];
+
       int excIdx = 0;
+      long minValue = Long.MAX_VALUE;
       long placeholder = 0;
+      boolean foundPlaceholder = false;
+
       for (int i = 0; i < vectorLen; i++) {
-        if (!AlpEncoderDecoder.isDoubleException(vectorBuffer[i], params.exponent, params.factor)) {
-          placeholder = AlpEncoderDecoder.encodeDouble(vectorBuffer[i], params.exponent, params.factor);
-          break;
+        double value = vectorBuffer[i];
+        long valueBits = Double.doubleToRawLongBits(value);
+
+        // Unconditional exceptions: NaN, Inf, -0.0
+        if (valueBits == DOUBLE_NEGATIVE_ZERO_BITS || (valueBits & 0x7FF0000000000000L) == 0x7FF0000000000000L) {
+          excPosBuffer[excIdx] = (short) i;
+          excValBuffer[excIdx] = value;
+          excIdx++;
+          encodedBuffer[i] = 0; // temporary
+          continue;
+        }
+
+        // Inline encode
+        double scaled = value * pow10e * pow10nf;
+        long encoded;
+        if (scaled >= 0) {
+          encoded = (long) ((scaled + MAGIC_DOUBLE) - MAGIC_DOUBLE);
+        } else {
+          encoded = (long) ((scaled - MAGIC_DOUBLE) + MAGIC_DOUBLE);
+        }
+
+        // Inline round-trip check
+        double decoded = encoded * pow10f * pow10ne;
+        if (valueBits != Double.doubleToRawLongBits(decoded)) {
+          excPosBuffer[excIdx] = (short) i;
+          excValBuffer[excIdx] = value;
+          excIdx++;
+          encodedBuffer[i] = 0; // temporary
+        } else {
+          encodedBuffer[i] = encoded;
+          if (!foundPlaceholder) {
+            placeholder = encoded;
+            foundPlaceholder = true;
+          }
+          if (encoded < minValue) minValue = encoded;
         }
       }
 
-      long minValue = Long.MAX_VALUE;
-      for (int i = 0; i < vectorLen; i++) {
-        if (AlpEncoderDecoder.isDoubleException(vectorBuffer[i], params.exponent, params.factor)) {
-          excPosBuffer[excIdx] = (short) i;
-          excValBuffer[excIdx] = vectorBuffer[i];
-          excIdx++;
-          encodedBuffer[i] = placeholder;
-        } else {
-          encodedBuffer[i] = AlpEncoderDecoder.encodeDouble(vectorBuffer[i], params.exponent, params.factor);
+      // Fill exception slots with placeholder
+      if (excIdx > 0) {
+        for (int i = 0; i < excIdx; i++) {
+          encodedBuffer[excPosBuffer[i] & 0xFFFF] = placeholder;
         }
-        if (encodedBuffer[i] < minValue) {
-          minValue = encodedBuffer[i];
-        }
+        if (placeholder < minValue) minValue = placeholder;
+      }
+      if (!foundPlaceholder) {
+        minValue = 0;
       }
 
       long maxDelta = 0;
@@ -469,8 +546,8 @@ public abstract class AlpValuesWriter extends ValuesWriter {
       // AlpInfo: exponent(1) + factor(1) + numExceptions(2) — little-endian
       metadataBuf[0] = (byte) params.exponent;
       metadataBuf[1] = (byte) params.factor;
-      metadataBuf[2] = (byte) (params.numExceptions & 0xFF);
-      metadataBuf[3] = (byte) ((params.numExceptions >>> 8) & 0xFF);
+      metadataBuf[2] = (byte) (excIdx & 0xFF);
+      metadataBuf[3] = (byte) ((excIdx >>> 8) & 0xFF);
       encodedVectors.write(metadataBuf, 0, ALP_INFO_SIZE);
 
       // ForInfo: frameOfReference(8) + bitWidth(1) — little-endian
@@ -489,15 +566,15 @@ public abstract class AlpValuesWriter extends ValuesWriter {
         packLongsWithBytePacker(encodedBuffer, vectorLen, bitWidth);
       }
 
-      if (params.numExceptions > 0) {
-        for (int i = 0; i < params.numExceptions; i++) {
+      if (excIdx > 0) {
+        for (int i = 0; i < excIdx; i++) {
           int pos = excPosBuffer[i] & 0xFFFF;
           metadataBuf[0] = (byte) (pos & 0xFF);
           metadataBuf[1] = (byte) ((pos >>> 8) & 0xFF);
           encodedVectors.write(metadataBuf, 0, Short.BYTES);
         }
 
-        for (int i = 0; i < params.numExceptions; i++) {
+        for (int i = 0; i < excIdx; i++) {
           long bits = Double.doubleToRawLongBits(excValBuffer[i]);
           metadataBuf[0] = (byte) (bits & 0xFF);
           metadataBuf[1] = (byte) ((bits >>> 8) & 0xFF);

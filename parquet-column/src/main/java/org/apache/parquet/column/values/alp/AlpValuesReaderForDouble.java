@@ -57,7 +57,7 @@ public class AlpValuesReaderForDouble extends AlpValuesReader {
       throw new ParquetDecodingException("ALP double data was already exhausted.");
     }
     ensureVectorDecoded();
-    int indexInVector = currentIndex % vectorSize;
+    int indexInVector = currentIndex & vectorMask;
     currentIndex++;
     return decodedValues[indexInVector];
   }
@@ -69,10 +69,10 @@ public class AlpValuesReaderForDouble extends AlpValuesReader {
 
     int exponent = vectorsData.get(pos) & 0xFF;
     int factor = vectorsData.get(pos + 1) & 0xFF;
-    int numExceptions = getShortLE(vectorsData, pos + 2) & 0xFFFF;
+    int numExceptions = vectorsData.getShort(pos + 2) & 0xFFFF;
     pos += ALP_INFO_SIZE;
 
-    long frameOfReference = getLongLE(vectorsData, pos);
+    long frameOfReference = vectorsData.getLong(pos);
     int bitWidth = vectorsData.get(pos + 8) & 0xFF;
     pos += DOUBLE_FOR_INFO_SIZE;
 
@@ -82,18 +82,21 @@ public class AlpValuesReaderForDouble extends AlpValuesReader {
       java.util.Arrays.fill(deltasBuffer, 0, vectorLen, 0L);
     }
 
+    // Hoist decode constants out of the per-value loop
+    double pow10f = DOUBLE_POW10[factor];
+    double pow10ne = DOUBLE_POW10_NEGATIVE[exponent];
     for (int i = 0; i < vectorLen; i++) {
       long encoded = deltasBuffer[i] + frameOfReference;
-      decodedValues[i] = AlpEncoderDecoder.decodeDouble(encoded, exponent, factor);
+      decodedValues[i] = encoded * pow10f * pow10ne;
     }
 
     if (numExceptions > 0) {
       for (int e = 0; e < numExceptions; e++) {
-        excPositionsBuffer[e] = getShortLE(vectorsData, pos) & 0xFFFF;
+        excPositionsBuffer[e] = vectorsData.getShort(pos) & 0xFFFF;
         pos += Short.BYTES;
       }
       for (int e = 0; e < numExceptions; e++) {
-        decodedValues[excPositionsBuffer[e]] = getDoubleLE(vectorsData, pos);
+        decodedValues[excPositionsBuffer[e]] = Double.longBitsToDouble(vectorsData.getLong(pos));
         pos += Double.BYTES;
       }
     }
@@ -131,22 +134,4 @@ public class AlpValuesReaderForDouble extends AlpValuesReader {
     return pos;
   }
 
-  private static int getShortLE(ByteBuffer buf, int pos) {
-    return (buf.get(pos) & 0xFF) | ((buf.get(pos + 1) & 0xFF) << 8);
-  }
-
-  private static long getLongLE(ByteBuffer buf, int pos) {
-    return (buf.get(pos) & 0xFFL)
-        | ((buf.get(pos + 1) & 0xFFL) << 8)
-        | ((buf.get(pos + 2) & 0xFFL) << 16)
-        | ((buf.get(pos + 3) & 0xFFL) << 24)
-        | ((buf.get(pos + 4) & 0xFFL) << 32)
-        | ((buf.get(pos + 5) & 0xFFL) << 40)
-        | ((buf.get(pos + 6) & 0xFFL) << 48)
-        | ((buf.get(pos + 7) & 0xFFL) << 56);
-  }
-
-  private static double getDoubleLE(ByteBuffer buf, int pos) {
-    return Double.longBitsToDouble(getLongLE(buf, pos));
-  }
 }

@@ -44,6 +44,8 @@ import org.apache.parquet.io.ParquetDecodingException;
 abstract class AlpValuesReader extends ValuesReader {
 
   protected int vectorSize;
+  protected int vectorMask; // vectorSize - 1, for fast modulo via bitwise AND
+  protected int logVectorSize; // log2(vectorSize), for fast division via right shift
   protected int totalCount;
   protected int numVectors;
   protected int currentIndex;
@@ -83,6 +85,8 @@ abstract class AlpValuesReader extends ValuesReader {
     }
 
     this.vectorSize = 1 << logVectorSize;
+    this.vectorMask = this.vectorSize - 1;
+    this.logVectorSize = logVectorSize;
     this.totalCount = numElements;
     this.numVectors = (numElements + vectorSize - 1) / vectorSize;
     this.currentIndex = 0;
@@ -135,7 +139,7 @@ abstract class AlpValuesReader extends ValuesReader {
   }
 
   protected void ensureVectorDecoded() {
-    int vectorIdx = currentIndex / vectorSize;
+    int vectorIdx = currentIndex >>> logVectorSize;
     if (vectorIdx != currentVectorIndex) {
       decodeVector(vectorIdx);
       currentVectorIndex = vectorIdx;

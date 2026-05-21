@@ -57,7 +57,7 @@ public class AlpValuesReaderForFloat extends AlpValuesReader {
       throw new ParquetDecodingException("ALP float data was already exhausted.");
     }
     ensureVectorDecoded();
-    int indexInVector = currentIndex % vectorSize;
+    int indexInVector = currentIndex & vectorMask;
     currentIndex++;
     return decodedValues[indexInVector];
   }
@@ -69,10 +69,10 @@ public class AlpValuesReaderForFloat extends AlpValuesReader {
 
     int exponent = vectorsData.get(pos) & 0xFF;
     int factor = vectorsData.get(pos + 1) & 0xFF;
-    int numExceptions = getShortLE(vectorsData, pos + 2) & 0xFFFF;
+    int numExceptions = vectorsData.getShort(pos + 2) & 0xFFFF;
     pos += ALP_INFO_SIZE;
 
-    int frameOfReference = getIntLE(vectorsData, pos);
+    int frameOfReference = vectorsData.getInt(pos);
     int bitWidth = vectorsData.get(pos + 4) & 0xFF;
     pos += FLOAT_FOR_INFO_SIZE;
 
@@ -82,19 +82,22 @@ public class AlpValuesReaderForFloat extends AlpValuesReader {
       java.util.Arrays.fill(deltasBuffer, 0, vectorLen, 0);
     }
 
+    // Hoist decode constants out of the per-value loop
+    float pow10f = FLOAT_POW10[factor];
+    float pow10ne = FLOAT_POW10_NEGATIVE[exponent];
     for (int i = 0; i < vectorLen; i++) {
       int encoded = deltasBuffer[i] + frameOfReference;
-      decodedValues[i] = AlpEncoderDecoder.decodeFloat(encoded, exponent, factor);
+      decodedValues[i] = encoded * pow10f * pow10ne;
     }
 
     // Overwrite exception slots with their original float values
     if (numExceptions > 0) {
       for (int e = 0; e < numExceptions; e++) {
-        excPositionsBuffer[e] = getShortLE(vectorsData, pos) & 0xFFFF;
+        excPositionsBuffer[e] = vectorsData.getShort(pos) & 0xFFFF;
         pos += Short.BYTES;
       }
       for (int e = 0; e < numExceptions; e++) {
-        decodedValues[excPositionsBuffer[e]] = getFloatLE(vectorsData, pos);
+        decodedValues[excPositionsBuffer[e]] = Float.intBitsToFloat(vectorsData.getInt(pos));
         pos += Float.BYTES;
       }
     }
@@ -131,20 +134,4 @@ public class AlpValuesReaderForFloat extends AlpValuesReader {
     return pos;
   }
 
-  private static int getShortLE(ByteBuffer buf, int pos) {
-    return (buf.get(pos) & 0xFF) | ((buf.get(pos + 1) & 0xFF) << 8);
-  }
-
-  // Explicit LE reads instead of relying on ByteBuffer order, since
-  // we use absolute get() which ignores the buffer's byte order.
-  private static int getIntLE(ByteBuffer buf, int pos) {
-    return (buf.get(pos) & 0xFF)
-        | ((buf.get(pos + 1) & 0xFF) << 8)
-        | ((buf.get(pos + 2) & 0xFF) << 16)
-        | ((buf.get(pos + 3) & 0xFF) << 24);
-  }
-
-  private static float getFloatLE(ByteBuffer buf, int pos) {
-    return Float.intBitsToFloat(getIntLE(buf, pos));
-  }
 }
