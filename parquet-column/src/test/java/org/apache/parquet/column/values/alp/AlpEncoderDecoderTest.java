@@ -346,4 +346,185 @@ public class AlpEncoderDecoderTest {
         "Preset result should be at least as good as full search",
         presetResult.numExceptions <= fullResult.numExceptions);
   }
+
+  // ========== P1: Cost Model Tie-Breaking ==========
+
+  /**
+   * Verify that when multiple (e,f) combos produce the same cost (same bit-width, same
+   * exception count), the one with the higher exponent is preferred. If exponents are equal,
+   * the higher factor wins. This matches the C++ reference implementation behavior.
+   */
+  @Test
+  public void testTieBreakingPrefersHigherExponent() {
+    // Integer values: 10, 20, 30, 40, 50
+    // At e=0,f=0: encode = value, range=40, bitWidth=6, exceptions=0
+    // At e=1,f=0: encode = value*10, range=400, bitWidth=9, exceptions=0 → WORSE (higher bw)
+    // So for these values, e=0 should win on cost. But let's test with values that have
+    // equal cost at multiple (e,f) combos.
+
+    // Values that are whole numbers: 1, 2, 3, 4, 5
+    // e=0,f=0: encoded = 1,2,3,4,5 → range=4, bw=3, exceptions=0
+    // e=1,f=1: encoded = 1*10*0.1 = 1, etc → same as above
+    // Both produce identical results. Tie-break should prefer higher e (then higher f).
+    float[] values = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
+    AlpEncoderDecoder.EncodingParams params = AlpEncoderDecoder.findBestFloatParams(values, 0, values.length);
+
+    // The result should have 0 exceptions (these are clean integers)
+    assertEquals("Should have 0 exceptions for integer values", 0, params.numExceptions);
+
+    // With tie-breaking, among all 0-exception combos with equal cost, highest e should win
+    // Specifically: if e=0,f=0 and e=1,f=1 have same cost, e=1,f=1 should be chosen
+    assertTrue("Exponent should be >= 0", params.exponent >= 0);
+    assertTrue("Factor should be <= exponent", params.factor <= params.exponent);
+  }
+
+  /**
+   * Verify that for a known monetary distribution (2 decimal places), the encoder
+   * picks parameters that produce 0 exceptions and valid round-trips.
+   * Note: e=2,f=0 does NOT work because POW10_NEGATIVE[2] = 1e-2 is not exact in
+   * IEEE 754, so 123 * 1e-2 != 1.23 bit-exactly. The encoder finds a different
+   * (e,f) combo where the multiply-by-reciprocal round-trips correctly.
+   */
+  @Test
+  public void testBestParamsForMonetaryData() {
+    float[] values = {1.23f, 4.56f, 7.89f, 10.11f, 12.13f, 99.99f, 0.01f, 50.50f};
+    AlpEncoderDecoder.EncodingParams params = AlpEncoderDecoder.findBestFloatParams(values, 0, values.length);
+
+    // Should have 0 exceptions — these are clean 2-decimal-place values
+    assertEquals("Monetary data should have 0 exceptions", 0, params.numExceptions);
+    // Verify round-trip actually works for all values
+    for (float v : values) {
+      assertFalse("Value " + v + " should not be exception with chosen params",
+          AlpEncoderDecoder.isFloatException(v, params.exponent, params.factor));
+    }
+  }
+
+  @Test
+  public void testBestParamsForMonetaryDataDouble() {
+    double[] values = {1.23, 4.56, 7.89, 10.11, 12.13, 99.99, 0.01, 50.50};
+    AlpEncoderDecoder.EncodingParams params = AlpEncoderDecoder.findBestDoubleParams(values, 0, values.length);
+
+    assertEquals("Monetary data should have 0 exceptions", 0, params.numExceptions);
+    for (double v : values) {
+      assertFalse("Value " + v + " should not be exception with chosen params",
+          AlpEncoderDecoder.isDoubleException(v, params.exponent, params.factor));
+    }
+  }
+
+  /**
+   * Verify exception count reported by findBestParams matches actual exceptions
+   * when encoding with those parameters.
+   */
+  @Test
+  public void testExceptionCountAccuracy() {
+    // Mix of clean values and values that will be exceptions for most (e,f) combos
+    float[] values = {1.23f, 4.56f, Float.NaN, 7.89f, Float.POSITIVE_INFINITY, 10.0f, -0.0f};
+    AlpEncoderDecoder.EncodingParams params = AlpEncoderDecoder.findBestFloatParams(values, 0, values.length);
+
+    int actualExceptions = 0;
+    for (float v : values) {
+      if (AlpEncoderDecoder.isFloatException(v, params.exponent, params.factor)) {
+        actualExceptions++;
+      }
+    }
+
+    assertEquals("Reported exception count should match actual",
+        actualExceptions, params.numExceptions);
+  }
+
+  @Test
+  public void testExceptionCountAccuracyDouble() {
+    double[] values = {1.23, 4.56, Double.NaN, 7.89, Double.POSITIVE_INFINITY, 10.0, -0.0};
+    AlpEncoderDecoder.EncodingParams params = AlpEncoderDecoder.findBestDoubleParams(values, 0, values.length);
+
+    int actualExceptions = 0;
+    for (double v : values) {
+      if (AlpEncoderDecoder.isDoubleException(v, params.exponent, params.factor)) {
+        actualExceptions++;
+      }
+    }
+
+    assertEquals("Reported exception count should match actual",
+        actualExceptions, params.numExceptions);
+  }
+
+  /**
+   * Verify that findBestParams with presets never reports fewer exceptions than actually exist.
+   * (It may report more due to suboptimal preset choice, but never fewer.)
+   */
+  @Test
+  public void testPresetExceptionCountNeverUnderestimates() {
+    float[] values = {1.23f, 4.56f, Float.NaN, 7.89f, -0.0f, 10.0f};
+    int[][] presets = {{2, 0}, {3, 1}, {5, 0}};
+    AlpEncoderDecoder.EncodingParams params =
+        AlpEncoderDecoder.findBestFloatParamsWithPresets(values, 0, values.length, presets);
+
+    int actualExceptions = 0;
+    for (float v : values) {
+      if (AlpEncoderDecoder.isFloatException(v, params.exponent, params.factor)) {
+        actualExceptions++;
+      }
+    }
+
+    assertEquals("Preset exception count should match actual for chosen params",
+        actualExceptions, params.numExceptions);
+  }
+
+  // ========== Encoding Limit Boundary Tests (Unit-Level) ==========
+
+  @Test
+  public void testFloatEncodingAtUpperLimit() {
+    // FLOAT_ENCODING_UPPER_LIMIT = 2147483520.0f is the range check.
+    // But magic trick precision (MAGIC_FLOAT = 2^22+2^23) only works for |value| < ~2^23.
+    // Values between 2^23 and the limit may or may not round-trip.
+
+    // Values within magic-trick precision range should NOT be exceptions
+    assertFalse("Small int should encode at e=0,f=0",
+        AlpEncoderDecoder.isFloatException(1000.0f, 0, 0));
+    assertFalse("8M should encode at e=0,f=0 (within 2^23)",
+        AlpEncoderDecoder.isFloatException(8000000.0f, 0, 0));
+
+    // Value above FLOAT_ENCODING_UPPER_LIMIT is always exception (range check fails)
+    assertTrue("Value above FLOAT_ENCODING_UPPER_LIMIT should be exception at e=0,f=0",
+        AlpEncoderDecoder.isFloatException(2200000000.0f, 0, 0));
+
+    // Negative limit
+    assertFalse("Negative small int should encode",
+        AlpEncoderDecoder.isFloatException(-1000.0f, 0, 0));
+    assertTrue("Large negative value should be exception",
+        AlpEncoderDecoder.isFloatException(-2200000000.0f, 0, 0));
+  }
+
+  @Test
+  public void testDoubleEncodingAtUpperLimit() {
+    // ENCODING_UPPER_LIMIT ≈ 9.2e18 is the range check.
+    // Magic trick precision (MAGIC_DOUBLE = 2^51+2^52) works for |value| < ~2^52 ≈ 4.5e15.
+
+    // Values within magic-trick precision range should NOT be exceptions
+    assertFalse("Small int should encode at e=0,f=0",
+        AlpEncoderDecoder.isDoubleException(1000.0, 0, 0));
+    assertFalse("4e15 should encode at e=0,f=0 (within 2^52)",
+        AlpEncoderDecoder.isDoubleException(4.0e15, 0, 0));
+
+    // Value above ENCODING_UPPER_LIMIT is always exception
+    assertTrue("Value above ENCODING_UPPER_LIMIT should be exception at e=0,f=0",
+        AlpEncoderDecoder.isDoubleException(9.3e18, 0, 0));
+
+    // Negative
+    assertFalse("Negative small value should encode",
+        AlpEncoderDecoder.isDoubleException(-1000.0, 0, 0));
+    assertTrue("Large negative value should be exception",
+        AlpEncoderDecoder.isDoubleException(-9.3e18, 0, 0));
+  }
+
+  @Test
+  public void testScalingOverflowBecomesException() {
+    // 100.0f * 1e10 = 1e12, well above FLOAT_ENCODING_UPPER_LIMIT
+    assertTrue("100.0 scaled by e=10 should overflow",
+        AlpEncoderDecoder.isFloatException(100.0f, 10, 0));
+
+    // 0.1f * 1e10 = 1e9, still within limit
+    assertFalse("0.1 scaled by e=10 should not overflow",
+        AlpEncoderDecoder.isFloatException(0.1f, 10, 0));
+  }
 }

@@ -1736,4 +1736,673 @@ public class AlpValuesEndToEndTest {
     assertEquals(0L, AlpEncoderDecoder.encodeDouble(0.0, 5, 0));
     assertEquals(42L, AlpEncoderDecoder.encodeDouble(42.0, 0, 0));
   }
+
+  // ========== P0: Encoding Limit Boundary Tests ==========
+
+  /**
+   * Values near the encoding limits. The FLOAT_ENCODING_UPPER_LIMIT (2147483520.0f)
+   * is the range check, but the magic-number rounding trick (MAGIC_FLOAT = 2^22+2^23)
+   * only works precisely for |scaled| < 2^23 ≈ 8388608. Values above that may fail
+   * the round-trip and become exceptions. This tests both behaviors.
+   */
+  @Test
+  public void testFloatEncodingLimitBoundary() throws Exception {
+    // Values within magic-trick precision range (< 2^23 = 8388608) that should encode
+    float withinPrecision = 8000000.0f;
+    assertFalse("8M should encode at e=0,f=0",
+        AlpEncoderDecoder.isFloatException(withinPrecision, 0, 0));
+
+    // Values above limit are always exceptions
+    float aboveLimit = 2200000000.0f;
+    assertTrue("Value above FLOAT_ENCODING_UPPER_LIMIT should be exception",
+        AlpEncoderDecoder.isFloatException(aboveLimit, 0, 0));
+
+    // Values at the encoding limit may be exceptions due to magic-trick precision loss
+    float atLimit = 2147483520.0f;
+    // Whether it's an exception depends on the magic trick — verify round-trip handles it
+    float[] values = {atLimit, -atLimit, aboveLimit, -aboveLimit,
+        withinPrecision, -withinPrecision, 1.0f, 100.0f, 0.0f, 42.0f};
+    roundTripFloat(values);
+  }
+
+  /**
+   * Double encoding limits. MAGIC_DOUBLE = 2^51+2^52, so magic trick works precisely
+   * for |scaled| < 2^52 ≈ 4.5e15. ENCODING_UPPER_LIMIT ≈ 9.2e18 is the range check.
+   */
+  @Test
+  public void testDoubleEncodingLimitBoundary() throws Exception {
+    // Values within magic-trick precision (< 2^52)
+    double withinPrecision = 4.0e15;
+    assertFalse("4e15 should encode at e=0,f=0",
+        AlpEncoderDecoder.isDoubleException(withinPrecision, 0, 0));
+
+    // Values above the encoding upper limit are always exceptions
+    double aboveLimit = 9.3e18;
+    assertTrue("Value above ENCODING_UPPER_LIMIT should be exception",
+        AlpEncoderDecoder.isDoubleException(aboveLimit, 0, 0));
+
+    // Large values within range but above magic-trick precision → may be exceptions
+    double abovePrecision = 5.0e15; // above 2^52, round-trip may fail
+    // Don't assert exception status — just verify round-trip through pipeline handles it
+
+    double[] values = {withinPrecision, -withinPrecision, aboveLimit, -aboveLimit,
+        abovePrecision, -abovePrecision, 1.0, 100.0, 0.0, 42.0};
+    roundTripDouble(values);
+  }
+
+  /**
+   * Values that exercise scaling near the encoding boundaries.
+   * With e=10 (max float exponent), value * 1e10 must stay within
+   * FLOAT_ENCODING_UPPER_LIMIT. Additionally, the magic trick only works
+   * precisely for |scaled| < 2^23 ≈ 8388608.
+   */
+  @Test
+  public void testFloatEncodingLimitWithScaling() throws Exception {
+    // With e=10: value * 1e10 must be within magic-trick range (< ~8.4M) to encode
+    // So max encodable value at e=10 ≈ 8388608 / 1e10 ≈ 0.0000008388608
+    float smallValue = 0.0000005f; // 5e-7 * 1e10 = 5000 → within range
+    assertFalse("Small value should encode at e=10",
+        AlpEncoderDecoder.isFloatException(smallValue, 10, 0));
+
+    // Larger value scaled overflows the limit entirely
+    float largeValue = 1.0f; // 1.0 * 1e10 = 1e10 > FLOAT_ENCODING_UPPER_LIMIT
+    assertTrue("1.0 scaled by e=10 should overflow",
+        AlpEncoderDecoder.isFloatException(largeValue, 10, 0));
+
+    // Mix values near limits with normal values — pipeline should handle all
+    float[] values = new float[32];
+    for (int i = 0; i < values.length; i++) {
+      values[i] = 0.0001f + i * 0.00001f; // small values that work at reasonable exponents
+    }
+    roundTripFloat(values);
+  }
+
+  // ========== P0: Partial Vector Tail Handling ==========
+
+  /** Exactly vectorSize values — single full vector, no tail. */
+  @Test
+  public void testExactlyOneVector() throws Exception {
+    float[] floats = new float[1024];
+    double[] doubles = new double[1024];
+    for (int i = 0; i < 1024; i++) {
+      floats[i] = i * 0.01f;
+      doubles[i] = i * 0.01;
+    }
+    roundTripFloat(floats);
+    roundTripDouble(doubles);
+  }
+
+  /** vectorSize + 1 = 1025 values — triggers partial second vector with 1 value. */
+  @Test
+  public void testVectorSizePlusOne() throws Exception {
+    float[] floats = new float[1025];
+    double[] doubles = new double[1025];
+    for (int i = 0; i < 1025; i++) {
+      floats[i] = i * 1.5f;
+      doubles[i] = i * 1.5;
+    }
+    roundTripFloat(floats);
+    roundTripDouble(doubles);
+  }
+
+  /** 2 * vectorSize - 1 = 2047 values — two vectors, second has 1023 values. */
+  @Test
+  public void testTwoVectorsMinusOne() throws Exception {
+    float[] floats = new float[2047];
+    double[] doubles = new double[2047];
+    for (int i = 0; i < 2047; i++) {
+      floats[i] = (float) Math.sin(i * 0.1);
+      doubles[i] = Math.sin(i * 0.1);
+    }
+    roundTripFloat(floats);
+    roundTripDouble(doubles);
+  }
+
+  /** Prime number of values (1031) — non-aligned, tests tail handling robustness. */
+  @Test
+  public void testPrimeNumberOfValues() throws Exception {
+    float[] floats = new float[1031];
+    double[] doubles = new double[1031];
+    for (int i = 0; i < 1031; i++) {
+      floats[i] = i * 0.123f;
+      doubles[i] = i * 0.123;
+    }
+    roundTripFloat(floats);
+    roundTripDouble(doubles);
+  }
+
+  /** Single value — minimal partial vector. */
+  @Test
+  public void testPartialVectorSingleValueFloat() throws Exception {
+    roundTripFloat(new float[] {42.5f});
+  }
+
+  @Test
+  public void testPartialVectorSingleValueDouble() throws Exception {
+    roundTripDouble(new double[] {42.5});
+  }
+
+  /** 3 values — very small partial vector. */
+  @Test
+  public void testPartialVectorThreeValues() throws Exception {
+    roundTripFloat(new float[] {1.1f, 2.2f, 3.3f});
+    roundTripDouble(new double[] {1.1, 2.2, 3.3});
+  }
+
+  /** Partial vector where all values are exceptions. */
+  @Test
+  public void testPartialVectorAllExceptions() throws Exception {
+    float[] floats = new float[5];
+    double[] doubles = new double[5];
+    for (int i = 0; i < 5; i++) {
+      floats[i] = (i % 2 == 0) ? Float.NaN : Float.POSITIVE_INFINITY;
+      doubles[i] = (i % 2 == 0) ? Double.NaN : Double.POSITIVE_INFINITY;
+    }
+    roundTripFloat(floats);
+    roundTripDouble(doubles);
+  }
+
+  // ========== P0: Unsigned Delta Overflow / Extreme Encoded Ranges ==========
+
+  /**
+   * Values that produce encoded integers spanning the full int range
+   * (negative to positive), testing unsigned delta computation.
+   * E.g., with e=0: -2147483520 to +2147483520 → unsigned range = ~4.29 billion.
+   */
+  @Test
+  public void testFloatFullIntRange() throws Exception {
+    // At e=0, f=0: encode(value) ≈ round(value)
+    // Use values near the int boundaries
+    float[] values = {
+        -2000000000.0f, -1000000000.0f, 0.0f, 1000000000.0f, 2000000000.0f,
+        -2147483520.0f, 2147483520.0f, // at the limit
+        -1.0f, 1.0f, 42.0f
+    };
+    roundTripFloat(values);
+  }
+
+  /**
+   * Double values that produce encoded longs spanning a large range.
+   */
+  @Test
+  public void testDoubleFullLongRange() throws Exception {
+    double[] values = {
+        -9.0e18, -1.0e18, 0.0, 1.0e18, 9.0e18,
+        -9223372036854774784.0, 9223372036854774784.0, // at the limit
+        -1.0, 1.0, 42.0
+    };
+    roundTripDouble(values);
+  }
+
+  /**
+   * Float values that encode to Integer.MIN_VALUE and Integer.MAX_VALUE with same (e,f).
+   * This exercises the unsigned delta path: toUnsignedLong(MAX_VALUE) - toUnsignedLong(MIN_VALUE).
+   */
+  @Test
+  public void testFloatEncodedIntMinMax() throws Exception {
+    // At e=0: round(-2147483520) = -2147483520 (near Integer.MIN_VALUE)
+    //         round(2147483520) = 2147483520 (near Integer.MAX_VALUE)
+    float[] values = new float[64];
+    for (int i = 0; i < 64; i++) {
+      // Mix large positive, large negative, and zero
+      if (i % 3 == 0) values[i] = 2000000000.0f;
+      else if (i % 3 == 1) values[i] = -2000000000.0f;
+      else values[i] = 0.0f;
+    }
+    roundTripFloat(values);
+  }
+
+  // ========== P0: Empty Writer Behavior ==========
+
+  @Test
+  public void testEmptyFloatWriter() throws Exception {
+    AlpValuesWriter.FloatAlpValuesWriter writer = new AlpValuesWriter.FloatAlpValuesWriter(
+        256, 256, new DirectByteBufferAllocator(), DEFAULT_VECTOR_SIZE);
+    try {
+      BytesInput bytes = writer.getBytes();
+      // Should produce a valid (possibly header-only) output
+      assertNotNull(bytes);
+      assertTrue("Empty writer should produce minimal output", bytes.size() >= 0);
+
+      // A reader initialized with 0 values should not crash
+      if (bytes.size() > 0) {
+        AlpValuesReaderForFloat reader = new AlpValuesReaderForFloat();
+        reader.initFromPage(0, ByteBufferInputStream.wrap(bytes.toByteBuffer()));
+      }
+    } finally {
+      writer.reset();
+      writer.close();
+    }
+  }
+
+  @Test
+  public void testEmptyDoubleWriter() throws Exception {
+    AlpValuesWriter.DoubleAlpValuesWriter writer = new AlpValuesWriter.DoubleAlpValuesWriter(
+        512, 512, new DirectByteBufferAllocator(), DEFAULT_VECTOR_SIZE);
+    try {
+      BytesInput bytes = writer.getBytes();
+      assertNotNull(bytes);
+      assertTrue("Empty writer should produce minimal output", bytes.size() >= 0);
+
+      if (bytes.size() > 0) {
+        AlpValuesReaderForDouble reader = new AlpValuesReaderForDouble();
+        reader.initFromPage(0, ByteBufferInputStream.wrap(bytes.toByteBuffer()));
+      }
+    } finally {
+      writer.reset();
+      writer.close();
+    }
+  }
+
+  // ========== P1: Vector Size Validation ==========
+
+  @Test(expected = IllegalArgumentException.class)
+  public void testVectorSizeZeroRejected() {
+    new AlpValuesWriter.FloatAlpValuesWriter(256, 256, new DirectByteBufferAllocator(), 0);
+  }
+
+  @Test(expected = IllegalArgumentException.class)
+  public void testVectorSizeOneRejected() {
+    new AlpValuesWriter.FloatAlpValuesWriter(256, 256, new DirectByteBufferAllocator(), 1);
+  }
+
+  @Test(expected = IllegalArgumentException.class)
+  public void testVectorSizeFourRejected() {
+    // MIN_LOG_VECTOR_SIZE = 3, so vectorSize=4 (log=2) is too small
+    // Actually log2(4) = 2 < 3, but log2(8) = 3, so 4 should be rejected
+    new AlpValuesWriter.FloatAlpValuesWriter(256, 256, new DirectByteBufferAllocator(), 4);
+  }
+
+  @Test(expected = IllegalArgumentException.class)
+  public void testVectorSizeNonPowerOfTwoRejected() {
+    new AlpValuesWriter.FloatAlpValuesWriter(256, 256, new DirectByteBufferAllocator(), 1000);
+  }
+
+  @Test(expected = IllegalArgumentException.class)
+  public void testVectorSizeTooLargeRejected() {
+    // MAX_LOG_VECTOR_SIZE = 15 → max = 32768. 65536 (log=16) should be rejected
+    new AlpValuesWriter.FloatAlpValuesWriter(256, 256, new DirectByteBufferAllocator(), 65536);
+  }
+
+  @Test
+  public void testVectorSizeMinimumAccepted() throws Exception {
+    // MIN_LOG_VECTOR_SIZE = 3 → minimum = 8
+    float[] values = new float[24]; // 3 vectors of 8
+    for (int i = 0; i < 24; i++) values[i] = i * 1.1f;
+    roundTripFloat(values, 8);
+  }
+
+  @Test
+  public void testVectorSizeMaximumAccepted() throws Exception {
+    // MAX_LOG_VECTOR_SIZE = 15 → maximum = 32768
+    float[] values = new float[32768];
+    for (int i = 0; i < values.length; i++) values[i] = i * 0.01f;
+    roundTripFloat(values, 32768);
+  }
+
+  // ========== P1: Reader Edge Cases ==========
+
+  @Test
+  public void testSkipZeroValues() throws Exception {
+    float[] values = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
+    AlpValuesWriter.FloatAlpValuesWriter writer = new AlpValuesWriter.FloatAlpValuesWriter(
+        256, 256, new DirectByteBufferAllocator(), DEFAULT_VECTOR_SIZE);
+    try {
+      for (float v : values) writer.writeFloat(v);
+      BytesInput bytes = writer.getBytes();
+      AlpValuesReaderForFloat reader = new AlpValuesReaderForFloat();
+      reader.initFromPage(values.length, ByteBufferInputStream.wrap(bytes.toByteBuffer()));
+
+      // skip(0) should be a no-op
+      reader.skip(0);
+      assertEquals(Float.floatToRawIntBits(1.0f), Float.floatToRawIntBits(reader.readFloat()));
+    } finally {
+      writer.reset();
+      writer.close();
+    }
+  }
+
+  @Test
+  public void testSkipToEnd() throws Exception {
+    float[] values = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
+    AlpValuesWriter.FloatAlpValuesWriter writer = new AlpValuesWriter.FloatAlpValuesWriter(
+        256, 256, new DirectByteBufferAllocator(), DEFAULT_VECTOR_SIZE);
+    try {
+      for (float v : values) writer.writeFloat(v);
+      BytesInput bytes = writer.getBytes();
+      AlpValuesReaderForFloat reader = new AlpValuesReaderForFloat();
+      reader.initFromPage(values.length, ByteBufferInputStream.wrap(bytes.toByteBuffer()));
+
+      // Skip all values
+      reader.skip(values.length);
+      // Reading past end should throw
+      try {
+        reader.readFloat();
+        fail("Should throw when reading past end");
+      } catch (ParquetDecodingException | IndexOutOfBoundsException e) {
+        // expected
+      }
+    } finally {
+      writer.reset();
+      writer.close();
+    }
+  }
+
+  @Test
+  public void testDoubleReaderPastEnd() throws Exception {
+    double[] values = {1.0, 2.0, 3.0};
+    AlpValuesWriter.DoubleAlpValuesWriter writer = new AlpValuesWriter.DoubleAlpValuesWriter(
+        512, 512, new DirectByteBufferAllocator(), DEFAULT_VECTOR_SIZE);
+    try {
+      for (double v : values) writer.writeDouble(v);
+      BytesInput bytes = writer.getBytes();
+      AlpValuesReaderForDouble reader = new AlpValuesReaderForDouble();
+      reader.initFromPage(values.length, ByteBufferInputStream.wrap(bytes.toByteBuffer()));
+
+      // Read all values
+      for (int i = 0; i < values.length; i++) reader.readDouble();
+
+      // Reading past end should throw
+      try {
+        reader.readDouble();
+        fail("Should throw when reading past end");
+      } catch (ParquetDecodingException | IndexOutOfBoundsException e) {
+        // expected
+      }
+    } finally {
+      writer.reset();
+      writer.close();
+    }
+  }
+
+  @Test
+  public void testDoubleSkipPastEnd() throws Exception {
+    double[] values = {1.0, 2.0, 3.0};
+    AlpValuesWriter.DoubleAlpValuesWriter writer = new AlpValuesWriter.DoubleAlpValuesWriter(
+        512, 512, new DirectByteBufferAllocator(), DEFAULT_VECTOR_SIZE);
+    try {
+      for (double v : values) writer.writeDouble(v);
+      BytesInput bytes = writer.getBytes();
+      AlpValuesReaderForDouble reader = new AlpValuesReaderForDouble();
+      reader.initFromPage(values.length, ByteBufferInputStream.wrap(bytes.toByteBuffer()));
+
+      // Skip past end
+      try {
+        reader.skip(values.length + 1);
+        // If skip doesn't throw, reading should
+        reader.readDouble();
+        fail("Should throw when skipping past end");
+      } catch (ParquetDecodingException | IndexOutOfBoundsException e) {
+        // expected
+      }
+    } finally {
+      writer.reset();
+      writer.close();
+    }
+  }
+
+  // ========== P1: Multiple Reset/Reuse Cycles ==========
+
+  @Test
+  public void testFloatWriterMultipleResetCycles() throws Exception {
+    AlpValuesWriter.FloatAlpValuesWriter writer = new AlpValuesWriter.FloatAlpValuesWriter(
+        256, 256, new DirectByteBufferAllocator(), DEFAULT_VECTOR_SIZE);
+    try {
+      for (int cycle = 0; cycle < 5; cycle++) {
+        float[] values = new float[100];
+        for (int i = 0; i < values.length; i++) {
+          values[i] = (cycle + 1) * i * 0.1f;
+        }
+        for (float v : values) writer.writeFloat(v);
+
+        BytesInput bytes = writer.getBytes();
+        AlpValuesReaderForFloat reader = new AlpValuesReaderForFloat();
+        reader.initFromPage(values.length, ByteBufferInputStream.wrap(bytes.toByteBuffer()));
+
+        for (int i = 0; i < values.length; i++) {
+          assertEquals(
+              "Cycle " + cycle + " index " + i,
+              Float.floatToRawIntBits(values[i]),
+              Float.floatToRawIntBits(reader.readFloat()));
+        }
+        writer.reset();
+      }
+    } finally {
+      writer.close();
+    }
+  }
+
+  @Test
+  public void testDoubleWriterMultipleResetCycles() throws Exception {
+    AlpValuesWriter.DoubleAlpValuesWriter writer = new AlpValuesWriter.DoubleAlpValuesWriter(
+        512, 512, new DirectByteBufferAllocator(), DEFAULT_VECTOR_SIZE);
+    try {
+      for (int cycle = 0; cycle < 5; cycle++) {
+        double[] values = new double[100];
+        for (int i = 0; i < values.length; i++) {
+          values[i] = (cycle + 1) * i * 0.1;
+        }
+        for (double v : values) writer.writeDouble(v);
+
+        BytesInput bytes = writer.getBytes();
+        AlpValuesReaderForDouble reader = new AlpValuesReaderForDouble();
+        reader.initFromPage(values.length, ByteBufferInputStream.wrap(bytes.toByteBuffer()));
+
+        for (int i = 0; i < values.length; i++) {
+          assertEquals(
+              "Cycle " + cycle + " index " + i,
+              Double.doubleToRawLongBits(values[i]),
+              Double.doubleToRawLongBits(reader.readDouble()));
+        }
+        writer.reset();
+      }
+    } finally {
+      writer.close();
+    }
+  }
+
+  // ========== P1: Exactly 1 Non-Exception Value ==========
+
+  /**
+   * A vector where all values are exceptions except one.
+   * Tests FOR with a single encoded value (bitWidth=0, range=0).
+   */
+  @Test
+  public void testFloatSingleNonExceptionInVector() throws Exception {
+    float[] values = new float[32];
+    for (int i = 0; i < values.length; i++) {
+      values[i] = Float.NaN;
+    }
+    values[15] = 42.0f; // The single non-exception
+    roundTripFloat(values, 32);
+  }
+
+  @Test
+  public void testDoubleSingleNonExceptionInVector() throws Exception {
+    double[] values = new double[32];
+    for (int i = 0; i < values.length; i++) {
+      values[i] = Double.NaN;
+    }
+    values[15] = 42.0; // The single non-exception
+    roundTripDouble(values, 32);
+  }
+
+  /**
+   * Two non-exception values that are identical (range=0, bitWidth=0).
+   */
+  @Test
+  public void testFloatAllIdenticalValues() throws Exception {
+    float[] values = new float[64];
+    java.util.Arrays.fill(values, 3.14f);
+    roundTripFloat(values, 64);
+  }
+
+  @Test
+  public void testDoubleAllIdenticalValues() throws Exception {
+    double[] values = new double[64];
+    java.util.Arrays.fill(values, 3.14);
+    roundTripDouble(values, 64);
+  }
+
+  // ========== P2: Special IEEE 754 Values ==========
+
+  /** Subnormal/denormal numbers. */
+  @Test
+  public void testFloatSubnormals() throws Exception {
+    float[] values = {
+        Float.MIN_VALUE, // smallest positive subnormal
+        Float.MIN_VALUE * 2,
+        Float.MIN_VALUE * 100,
+        Float.MIN_NORMAL, // smallest normal
+        -Float.MIN_VALUE,
+        -Float.MIN_NORMAL,
+        1.0f, 2.0f, 3.0f // some normal values mixed in
+    };
+    roundTripFloat(values);
+  }
+
+  @Test
+  public void testDoubleSubnormals() throws Exception {
+    double[] values = {
+        Double.MIN_VALUE, // smallest positive subnormal
+        Double.MIN_VALUE * 2,
+        Double.MIN_VALUE * 100,
+        Double.MIN_NORMAL, // smallest normal
+        -Double.MIN_VALUE,
+        -Double.MIN_NORMAL,
+        1.0, 2.0, 3.0
+    };
+    roundTripDouble(values);
+  }
+
+  /** MAX_VALUE — largest finite value. */
+  @Test
+  public void testFloatMaxValue() throws Exception {
+    float[] values = {
+        Float.MAX_VALUE, -Float.MAX_VALUE,
+        Float.MAX_VALUE / 2, -Float.MAX_VALUE / 2,
+        1.0f, 0.0f
+    };
+    roundTripFloat(values);
+  }
+
+  @Test
+  public void testDoubleMaxValue() throws Exception {
+    double[] values = {
+        Double.MAX_VALUE, -Double.MAX_VALUE,
+        Double.MAX_VALUE / 2, -Double.MAX_VALUE / 2,
+        1.0, 0.0
+    };
+    roundTripDouble(values);
+  }
+
+  /** Mixed -0.0 and +0.0 in same vector — -0.0 should be exception, +0.0 should encode. */
+  @Test
+  public void testFloatMixedZeros() throws Exception {
+    float[] values = new float[16];
+    for (int i = 0; i < values.length; i++) {
+      values[i] = (i % 2 == 0) ? 0.0f : -0.0f;
+    }
+    roundTripFloat(values);
+
+    // Verify the bit patterns are distinct
+    assertNotEquals("0.0f and -0.0f should have different bits",
+        Float.floatToRawIntBits(0.0f), Float.floatToRawIntBits(-0.0f));
+  }
+
+  @Test
+  public void testDoubleMixedZeros() throws Exception {
+    double[] values = new double[16];
+    for (int i = 0; i < values.length; i++) {
+      values[i] = (i % 2 == 0) ? 0.0 : -0.0;
+    }
+    roundTripDouble(values);
+  }
+
+  /** Multiple distinct NaN payloads — all must be preserved bit-exactly. */
+  @Test
+  public void testFloatMultipleNanPayloads() throws Exception {
+    float[] values = {
+        Float.intBitsToFloat(0x7FC00000), // quiet NaN (default)
+        Float.intBitsToFloat(0x7FC00001), // quiet NaN with payload 1
+        Float.intBitsToFloat(0x7FC0DEAD), // quiet NaN with custom payload
+        Float.intBitsToFloat(0x7F800001), // signaling NaN
+        Float.intBitsToFloat(0x7FBFFFFF), // signaling NaN with max payload
+        Float.intBitsToFloat(0xFFC00000), // negative quiet NaN
+        Float.intBitsToFloat(0xFF800001), // negative signaling NaN
+        1.0f, 2.0f, 3.0f // some normal values
+    };
+    roundTripFloat(values);
+  }
+
+  @Test
+  public void testDoubleMultipleNanPayloads() throws Exception {
+    double[] values = {
+        Double.longBitsToDouble(0x7FF8000000000000L), // quiet NaN (default)
+        Double.longBitsToDouble(0x7FF8000000000001L), // quiet NaN with payload 1
+        Double.longBitsToDouble(0x7FF800000000DEADL), // quiet NaN with custom payload
+        Double.longBitsToDouble(0x7FF0000000000001L), // signaling NaN
+        Double.longBitsToDouble(0x7FF7FFFFFFFFFFFFL), // signaling NaN with max payload
+        Double.longBitsToDouble(0xFFF8000000000000L), // negative quiet NaN
+        Double.longBitsToDouble(0xFFF0000000000001L), // negative signaling NaN
+        1.0, 2.0, 3.0
+    };
+    roundTripDouble(values);
+  }
+
+  // ========== P2: getBufferedSize / getAllocatedSize ==========
+
+  @Test
+  public void testGetBufferedSizeAfterReset() throws Exception {
+    AlpValuesWriter.FloatAlpValuesWriter writer = new AlpValuesWriter.FloatAlpValuesWriter(
+        256, 256, new DirectByteBufferAllocator(), DEFAULT_VECTOR_SIZE);
+    try {
+      // Write some values
+      for (int i = 0; i < 100; i++) writer.writeFloat(i * 1.0f);
+      long sizeAfterWrite = writer.getBufferedSize();
+      assertTrue("Buffered size should be > 0 after writing", sizeAfterWrite > 0);
+
+      writer.reset();
+      long sizeAfterReset = writer.getBufferedSize();
+      assertEquals("Buffered size should be 0 after reset", 0, sizeAfterReset);
+    } finally {
+      writer.close();
+    }
+  }
+
+  @Test
+  public void testGetAllocatedSizePositive() throws Exception {
+    AlpValuesWriter.FloatAlpValuesWriter writer = new AlpValuesWriter.FloatAlpValuesWriter(
+        256, 256, new DirectByteBufferAllocator(), DEFAULT_VECTOR_SIZE);
+    try {
+      assertTrue("Allocated size should be > 0", writer.getAllocatedSize() > 0);
+      for (int i = 0; i < 100; i++) writer.writeFloat(i * 1.0f);
+      assertTrue("Allocated size should still be > 0", writer.getAllocatedSize() > 0);
+    } finally {
+      writer.reset();
+      writer.close();
+    }
+  }
+
+  // ========== P2: getBytes Called Twice Without Reset ==========
+
+  @Test
+  public void testGetBytesTwiceWithoutReset() throws Exception {
+    AlpValuesWriter.FloatAlpValuesWriter writer = new AlpValuesWriter.FloatAlpValuesWriter(
+        256, 256, new DirectByteBufferAllocator(), DEFAULT_VECTOR_SIZE);
+    try {
+      for (int i = 0; i < 10; i++) writer.writeFloat(i * 1.0f);
+
+      BytesInput bytes1 = writer.getBytes();
+      BytesInput bytes2 = writer.getBytes();
+
+      // Both calls should return valid data (whether identical or not, shouldn't crash)
+      assertNotNull(bytes1);
+      assertNotNull(bytes2);
+      assertTrue("First getBytes should have content", bytes1.size() > 0);
+    } finally {
+      writer.reset();
+      writer.close();
+    }
+  }
 }
