@@ -569,4 +569,508 @@ public class AlpEncodingBenchmarks {
       return doubleWriter.getBytes();
     }
   }
+
+  // ==================== ExceptionRateGradient: Throughput vs exception rate ====================
+
+  /**
+   * Measures encoding throughput as exception rate increases from 1% to 50%.
+   *
+   * <p>This characterizes the relationship between exception density and encoding cost,
+   * revealing the inflection point where ALP becomes inefficient and a fallback (like
+   * ALP-RD or BYTE_STREAM_SPLIT) would be preferable.
+   *
+   * <p>Exception values are NaN/Inf/subnormal injected at the specified rate into
+   * otherwise-clean monetary data, ensuring the exception rate is the only variable.
+   */
+  @State(Scope.Benchmark)
+  @BenchmarkMode(Mode.Throughput)
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @Warmup(iterations = 3, time = 2)
+  @Measurement(iterations = 5, time = 3)
+  @Fork(value = 2)
+  public static class ExceptionRateGradient {
+
+    @Param({"1", "5", "10", "20", "30", "50"})
+    private int exceptionPercent;
+
+    private static final int NUM_VALUES = 65536;
+
+    private float[] floatData;
+    private double[] doubleData;
+    private AlpValuesWriter.FloatAlpValuesWriter floatWriter;
+    private AlpValuesWriter.DoubleAlpValuesWriter doubleWriter;
+
+    @Setup(Level.Trial)
+    public void setup() {
+      Random rand = new Random(42);
+      floatData = new float[NUM_VALUES];
+      doubleData = new double[NUM_VALUES];
+
+      for (int i = 0; i < NUM_VALUES; i++) {
+        if (rand.nextInt(100) < exceptionPercent) {
+          // Exception: mix of NaN, Inf, subnormal, -0.0
+          int excType = rand.nextInt(4);
+          switch (excType) {
+            case 0: floatData[i] = Float.NaN; doubleData[i] = Double.NaN; break;
+            case 1: floatData[i] = Float.POSITIVE_INFINITY; doubleData[i] = Double.POSITIVE_INFINITY; break;
+            case 2: floatData[i] = Float.NEGATIVE_INFINITY; doubleData[i] = Double.NEGATIVE_INFINITY; break;
+            case 3: floatData[i] = -0.0f; doubleData[i] = -0.0; break;
+          }
+        } else {
+          // Clean monetary value
+          float fv = Math.round(rand.nextFloat() * 999999) / 100.0f;
+          floatData[i] = fv;
+          doubleData[i] = Math.round(rand.nextDouble() * 999999) / 100.0;
+        }
+      }
+
+      floatWriter =
+          new AlpValuesWriter.FloatAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      doubleWriter =
+          new AlpValuesWriter.DoubleAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+    }
+
+    @TearDown(Level.Trial)
+    public void tearDown() {
+      floatWriter.close();
+      doubleWriter.close();
+    }
+
+    @Benchmark
+    public BytesInput encodeFloat() throws IOException {
+      floatWriter.reset();
+      for (float v : floatData) {
+        floatWriter.writeFloat(v);
+      }
+      return floatWriter.getBytes();
+    }
+
+    @Benchmark
+    public BytesInput encodeDouble() throws IOException {
+      doubleWriter.reset();
+      for (double v : doubleData) {
+        doubleWriter.writeDouble(v);
+      }
+      return doubleWriter.getBytes();
+    }
+
+    @Benchmark
+    public void decodeFloat(Blackhole bh) throws IOException {
+      floatWriter.reset();
+      for (float v : floatData) floatWriter.writeFloat(v);
+      ByteBuffer buf = floatWriter.getBytes().toByteBuffer();
+      AlpValuesReaderForFloat reader = new AlpValuesReaderForFloat();
+      reader.initFromPage(NUM_VALUES, ByteBufferInputStream.wrap(buf));
+      for (int i = 0; i < NUM_VALUES; i++) bh.consume(reader.readFloat());
+    }
+
+    @Benchmark
+    public void decodeDouble(Blackhole bh) throws IOException {
+      doubleWriter.reset();
+      for (double v : doubleData) doubleWriter.writeDouble(v);
+      ByteBuffer buf = doubleWriter.getBytes().toByteBuffer();
+      AlpValuesReaderForDouble reader = new AlpValuesReaderForDouble();
+      reader.initFromPage(NUM_VALUES, ByteBufferInputStream.wrap(buf));
+      for (int i = 0; i < NUM_VALUES; i++) bh.consume(reader.readDouble());
+    }
+  }
+
+  // ==================== VectorSizeVariation: Impact of vector size on throughput ====================
+
+  /**
+   * Measures encoding throughput at different vector sizes (8, 64, 256, 1024, 4096, 32768).
+   *
+   * <p>Vector size affects: header overhead per vector (fixed cost amortized over fewer values),
+   * L1 cache locality (smaller vectors fit in L1), and brute-force search cost per vector.
+   * This validates the default choice of 1024 and reveals tradeoffs.
+   */
+  @State(Scope.Benchmark)
+  @BenchmarkMode(Mode.Throughput)
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @Warmup(iterations = 3, time = 2)
+  @Measurement(iterations = 5, time = 3)
+  @Fork(value = 2)
+  public static class VectorSizeVariation {
+
+    @Param({"8", "64", "256", "1024", "4096", "32768"})
+    private int vectorSize;
+
+    @Param({"MONETARY", "SENSOR"})
+    private DataDistribution distribution;
+
+    private static final int NUM_VALUES = 65536;
+
+    private float[] floatData;
+    private double[] doubleData;
+    private AlpValuesWriter.FloatAlpValuesWriter floatWriter;
+    private AlpValuesWriter.DoubleAlpValuesWriter doubleWriter;
+
+    @Setup(Level.Trial)
+    public void setup() {
+      Random rand = new Random(42);
+      floatData = generateFloatData(distribution, NUM_VALUES, rand);
+      doubleData = generateDoubleData(distribution, NUM_VALUES, rand);
+      floatWriter = new AlpValuesWriter.FloatAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator(), vectorSize);
+      doubleWriter = new AlpValuesWriter.DoubleAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator(), vectorSize);
+    }
+
+    @TearDown(Level.Trial)
+    public void tearDown() {
+      floatWriter.close();
+      doubleWriter.close();
+    }
+
+    @Benchmark
+    public BytesInput encodeFloat() throws IOException {
+      floatWriter.reset();
+      for (float v : floatData) {
+        floatWriter.writeFloat(v);
+      }
+      return floatWriter.getBytes();
+    }
+
+    @Benchmark
+    public BytesInput encodeDouble() throws IOException {
+      doubleWriter.reset();
+      for (double v : doubleData) {
+        doubleWriter.writeDouble(v);
+      }
+      return doubleWriter.getBytes();
+    }
+  }
+
+  // ==================== MultiPageColumnChunk: Sequential page encoding ====================
+
+  /**
+   * Simulates writing a column chunk with multiple pages, measuring throughput
+   * across sequential reset-write-getBytes cycles.
+   *
+   * <p>This exposes the preset-cache-reset penalty: presets are currently lost on reset(),
+   * so each page re-performs brute-force parameter search for the first 8 vectors.
+   * With 10 pages of 65K values each, this measures real-world column-chunk throughput.
+   */
+  @State(Scope.Benchmark)
+  @BenchmarkMode(Mode.Throughput)
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @Warmup(iterations = 3, time = 2)
+  @Measurement(iterations = 5, time = 3)
+  @Fork(value = 2)
+  public static class MultiPageColumnChunk {
+
+    @Param({"MONETARY", "SENSOR"})
+    private DataDistribution distribution;
+
+    @Param({"10", "20"})
+    private int numPages;
+
+    private static final int VALUES_PER_PAGE = 65536;
+
+    private float[][] floatPages;
+    private double[][] doublePages;
+    private AlpValuesWriter.FloatAlpValuesWriter floatWriter;
+    private AlpValuesWriter.DoubleAlpValuesWriter doubleWriter;
+
+    @Setup(Level.Trial)
+    public void setup() {
+      Random rand = new Random(42);
+      floatPages = new float[numPages][];
+      doublePages = new double[numPages][];
+      for (int p = 0; p < numPages; p++) {
+        floatPages[p] = generateFloatData(distribution, VALUES_PER_PAGE, rand);
+        doublePages[p] = generateDoubleData(distribution, VALUES_PER_PAGE, rand);
+      }
+      floatWriter =
+          new AlpValuesWriter.FloatAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      doubleWriter =
+          new AlpValuesWriter.DoubleAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+    }
+
+    @TearDown(Level.Trial)
+    public void tearDown() {
+      floatWriter.close();
+      doubleWriter.close();
+    }
+
+    /** Encodes numPages pages sequentially, returning total bytes written. */
+    @Benchmark
+    public long encodeFloatColumnChunk() throws IOException {
+      long totalBytes = 0;
+      for (int p = 0; p < numPages; p++) {
+        floatWriter.reset();
+        for (float v : floatPages[p]) {
+          floatWriter.writeFloat(v);
+        }
+        totalBytes += floatWriter.getBytes().size();
+      }
+      return totalBytes;
+    }
+
+    @Benchmark
+    public long encodeDoubleColumnChunk() throws IOException {
+      long totalBytes = 0;
+      for (int p = 0; p < numPages; p++) {
+        doubleWriter.reset();
+        for (double v : doublePages[p]) {
+          doubleWriter.writeDouble(v);
+        }
+        totalBytes += doubleWriter.getBytes().size();
+      }
+      return totalBytes;
+    }
+  }
+
+  // ==================== MixedDistribution: Distribution shift mid-page ====================
+
+  /**
+   * Simulates data with a distribution change mid-page (e.g., sensor data that
+   * transitions between normal readings and anomalous values).
+   *
+   * <p>The first half is clean MONETARY data, the second half is SENSOR data with
+   * different scaling. This tests whether the sampler picks parameters robust to
+   * distribution shifts, and measures the cost of suboptimal preset reuse.
+   */
+  @State(Scope.Benchmark)
+  @BenchmarkMode(Mode.Throughput)
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @Warmup(iterations = 3, time = 2)
+  @Measurement(iterations = 5, time = 3)
+  @Fork(value = 2)
+  public static class MixedDistribution {
+
+    /** How the distributions are mixed within a page. */
+    public enum MixPattern {
+      /** First half MONETARY, second half SENSOR */
+      HALF_HALF,
+      /** Alternating blocks of 1024: MONETARY, SENSOR, MONETARY, SENSOR... */
+      ALTERNATING_BLOCKS,
+      /** 90% MONETARY with 10% random SENSOR bursts scattered throughout */
+      BURST_ANOMALY
+    }
+
+    @Param({"HALF_HALF", "ALTERNATING_BLOCKS", "BURST_ANOMALY"})
+    private MixPattern mixPattern;
+
+    private static final int NUM_VALUES = 65536;
+
+    private float[] floatData;
+    private double[] doubleData;
+    private AlpValuesWriter.FloatAlpValuesWriter floatWriter;
+    private AlpValuesWriter.DoubleAlpValuesWriter doubleWriter;
+
+    @Setup(Level.Trial)
+    public void setup() {
+      Random rand = new Random(42);
+      floatData = new float[NUM_VALUES];
+      doubleData = new double[NUM_VALUES];
+
+      switch (mixPattern) {
+        case HALF_HALF: {
+          float[] monetary = generateFloatData(DataDistribution.MONETARY, NUM_VALUES / 2, rand);
+          float[] sensor = generateFloatData(DataDistribution.SENSOR, NUM_VALUES / 2, rand);
+          System.arraycopy(monetary, 0, floatData, 0, NUM_VALUES / 2);
+          System.arraycopy(sensor, 0, floatData, NUM_VALUES / 2, NUM_VALUES / 2);
+          double[] monetaryD = generateDoubleData(DataDistribution.MONETARY, NUM_VALUES / 2, rand);
+          double[] sensorD = generateDoubleData(DataDistribution.SENSOR, NUM_VALUES / 2, rand);
+          System.arraycopy(monetaryD, 0, doubleData, 0, NUM_VALUES / 2);
+          System.arraycopy(sensorD, 0, doubleData, NUM_VALUES / 2, NUM_VALUES / 2);
+          break;
+        }
+        case ALTERNATING_BLOCKS: {
+          int blockSize = 1024;
+          for (int i = 0; i < NUM_VALUES; i += blockSize) {
+            DataDistribution dist = ((i / blockSize) % 2 == 0)
+                ? DataDistribution.MONETARY : DataDistribution.SENSOR;
+            float[] block = generateFloatData(dist, blockSize, rand);
+            double[] blockD = generateDoubleData(dist, blockSize, rand);
+            System.arraycopy(block, 0, floatData, i, blockSize);
+            System.arraycopy(blockD, 0, doubleData, i, blockSize);
+          }
+          break;
+        }
+        case BURST_ANOMALY: {
+          // 90% monetary base
+          float[] base = generateFloatData(DataDistribution.MONETARY, NUM_VALUES, rand);
+          double[] baseD = generateDoubleData(DataDistribution.MONETARY, NUM_VALUES, rand);
+          System.arraycopy(base, 0, floatData, 0, NUM_VALUES);
+          System.arraycopy(baseD, 0, doubleData, 0, NUM_VALUES);
+          // Inject 10% sensor bursts at random positions
+          float[] bursts = generateFloatData(DataDistribution.SENSOR, NUM_VALUES / 10, rand);
+          double[] burstsD = generateDoubleData(DataDistribution.SENSOR, NUM_VALUES / 10, rand);
+          for (int i = 0; i < bursts.length; i++) {
+            int pos = rand.nextInt(NUM_VALUES);
+            floatData[pos] = bursts[i];
+            doubleData[pos] = burstsD[i];
+          }
+          break;
+        }
+      }
+
+      floatWriter =
+          new AlpValuesWriter.FloatAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      doubleWriter =
+          new AlpValuesWriter.DoubleAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+    }
+
+    @TearDown(Level.Trial)
+    public void tearDown() {
+      floatWriter.close();
+      doubleWriter.close();
+    }
+
+    @Benchmark
+    public BytesInput encodeFloat() throws IOException {
+      floatWriter.reset();
+      for (float v : floatData) {
+        floatWriter.writeFloat(v);
+      }
+      return floatWriter.getBytes();
+    }
+
+    @Benchmark
+    public BytesInput encodeDouble() throws IOException {
+      doubleWriter.reset();
+      for (double v : doubleData) {
+        doubleWriter.writeDouble(v);
+      }
+      return doubleWriter.getBytes();
+    }
+  }
+
+  // ==================== CompressionRatio: Space efficiency measurement ====================
+
+  /**
+   * Measures compression ratio (encoded bytes / raw bytes) across distributions.
+   *
+   * <p>Uses SingleShotTime mode with 1 fork to report compressed sizes quickly.
+   * The actual compressed size is printed in tearDown for each distribution.
+   * The benchmark "score" is the encoding time for reference.
+   *
+   * <p>Run with: {@code java -jar parquet-benchmarks.jar CompressionRatio -f 1 -wi 0 -i 1}
+   */
+  @State(Scope.Benchmark)
+  @BenchmarkMode(Mode.SingleShotTime)
+  @OutputTimeUnit(TimeUnit.MILLISECONDS)
+  @Warmup(iterations = 1)
+  @Measurement(iterations = 1)
+  @Fork(value = 1)
+  public static class CompressionRatio {
+
+    @Param({"INTEGER", "MONETARY", "SENSOR", "RANDOM", "HIGH_EXCEPTION"})
+    private DataDistribution distribution;
+
+    private static final int NUM_VALUES = 65536;
+
+    private float[] floatData;
+    private double[] doubleData;
+
+    @Setup(Level.Trial)
+    public void setup() {
+      Random rand = new Random(42);
+      floatData = generateFloatData(distribution, NUM_VALUES, rand);
+      doubleData = generateDoubleData(distribution, NUM_VALUES, rand);
+    }
+
+    @Benchmark
+    public void measureFloatCompression(Blackhole bh) throws IOException {
+      AlpValuesWriter.FloatAlpValuesWriter writer = new AlpValuesWriter.FloatAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      try {
+        for (float v : floatData) writer.writeFloat(v);
+        BytesInput bytes = writer.getBytes();
+        long encodedSize = bytes.size();
+        long rawSize = (long) NUM_VALUES * 4;
+        System.out.printf("  >>> [%s] Float: %d -> %d bytes (%.2fx compression, %.1f%% of raw)%n",
+            distribution, rawSize, encodedSize,
+            (double) rawSize / encodedSize,
+            100.0 * encodedSize / rawSize);
+        bh.consume(bytes);
+      } finally {
+        writer.reset();
+        writer.close();
+      }
+    }
+
+    @Benchmark
+    public void measureDoubleCompression(Blackhole bh) throws IOException {
+      AlpValuesWriter.DoubleAlpValuesWriter writer = new AlpValuesWriter.DoubleAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      try {
+        for (double v : doubleData) writer.writeDouble(v);
+        BytesInput bytes = writer.getBytes();
+        long encodedSize = bytes.size();
+        long rawSize = (long) NUM_VALUES * 8;
+        System.out.printf("  >>> [%s] Double: %d -> %d bytes (%.2fx compression, %.1f%% of raw)%n",
+            distribution, rawSize, encodedSize,
+            (double) rawSize / encodedSize,
+            100.0 * encodedSize / rawSize);
+        bh.consume(bytes);
+      } finally {
+        writer.reset();
+        writer.close();
+      }
+    }
+  }
+
+  // ==================== PartialVector: Non-aligned value counts ====================
+
+  /**
+   * Measures encoding throughput for non-power-of-2 value counts that produce
+   * partial (tail) vectors. Tests the overhead of flush logic for short vectors.
+   */
+  @State(Scope.Benchmark)
+  @BenchmarkMode(Mode.Throughput)
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @Warmup(iterations = 3, time = 2)
+  @Measurement(iterations = 5, time = 3)
+  @Fork(value = 2)
+  public static class PartialVector {
+
+    /** Value counts chosen to exercise tail handling:
+     * 1025 = 1 full + 1 value, 2000 = 1 full + 976, 5000 = 4 full + 904,
+     * 65000 = 63 full + 488 */
+    @Param({"1025", "2000", "5000", "65000"})
+    private int numValues;
+
+    private float[] floatData;
+    private double[] doubleData;
+    private AlpValuesWriter.FloatAlpValuesWriter floatWriter;
+    private AlpValuesWriter.DoubleAlpValuesWriter doubleWriter;
+
+    @Setup(Level.Trial)
+    public void setup() {
+      Random rand = new Random(42);
+      floatData = generateFloatData(DataDistribution.MONETARY, numValues, rand);
+      doubleData = generateDoubleData(DataDistribution.MONETARY, numValues, rand);
+      floatWriter =
+          new AlpValuesWriter.FloatAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      doubleWriter =
+          new AlpValuesWriter.DoubleAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+    }
+
+    @TearDown(Level.Trial)
+    public void tearDown() {
+      floatWriter.close();
+      doubleWriter.close();
+    }
+
+    @Benchmark
+    public BytesInput encodeFloat() throws IOException {
+      floatWriter.reset();
+      for (float v : floatData) {
+        floatWriter.writeFloat(v);
+      }
+      return floatWriter.getBytes();
+    }
+
+    @Benchmark
+    public BytesInput encodeDouble() throws IOException {
+      doubleWriter.reset();
+      for (double v : doubleData) {
+        doubleWriter.writeDouble(v);
+      }
+      return doubleWriter.getBytes();
+    }
+  }
 }
