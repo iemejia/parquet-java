@@ -202,7 +202,7 @@ final class AlpEncoderDecoder {
         int nonExceptions = length - exceptions;
         if (nonExceptions == 0) continue;
         long delta = (nonExceptions < 2) ? 0 :
-            Integer.toUnsignedLong(maxEncoded) - Integer.toUnsignedLong(minEncoded);
+            (long) maxEncoded - (long) minEncoded;
         int bitsPerValue = (delta == 0) ? 0 : (64 - Long.numberOfLeadingZeros(delta));
         long estimatedSize = (long) length * bitsPerValue
             + (long) exceptions * (Float.SIZE + Short.SIZE);
@@ -248,7 +248,7 @@ final class AlpEncoderDecoder {
       int nonExceptions = length - exceptions;
       if (nonExceptions == 0) continue;
       long delta = (nonExceptions < 2) ? 0 :
-          Integer.toUnsignedLong(maxEncoded) - Integer.toUnsignedLong(minEncoded);
+          (long) maxEncoded - (long) minEncoded;
       int bitsPerValue = (delta == 0) ? 0 : (64 - Long.numberOfLeadingZeros(delta));
       long estimatedSize = (long) length * bitsPerValue
           + (long) exceptions * (Float.SIZE + Short.SIZE);

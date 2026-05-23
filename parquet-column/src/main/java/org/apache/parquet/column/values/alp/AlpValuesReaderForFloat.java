@@ -72,9 +72,27 @@ public class AlpValuesReaderForFloat extends AlpValuesReader {
     int numExceptions = getShortLE(vectorsData, pos + 2) & 0xFFFF;
     pos += ALP_INFO_SIZE;
 
+    if (exponent > FLOAT_MAX_EXPONENT) {
+      throw new ParquetDecodingException(
+          "Invalid ALP exponent for FLOAT: " + exponent + " (max " + FLOAT_MAX_EXPONENT + ")");
+    }
+    if (factor > FLOAT_MAX_EXPONENT) {
+      throw new ParquetDecodingException(
+          "Invalid ALP factor for FLOAT: " + factor + " (max " + FLOAT_MAX_EXPONENT + ")");
+    }
+    if (numExceptions > vectorLen) {
+      throw new ParquetDecodingException(
+          "ALP numExceptions (" + numExceptions + ") exceeds vector length (" + vectorLen + ")");
+    }
+
     int frameOfReference = getIntLE(vectorsData, pos);
     int bitWidth = vectorsData.get(pos + 4) & 0xFF;
     pos += FLOAT_FOR_INFO_SIZE;
+
+    if (bitWidth > Integer.SIZE) {
+      throw new ParquetDecodingException(
+          "Invalid ALP bit width for FLOAT: " + bitWidth + " (max " + Integer.SIZE + ")");
+    }
 
     if (bitWidth > 0) {
       pos = unpackIntsWithBytePacker(vectorsData, pos, deltasBuffer, vectorLen, bitWidth);
@@ -90,7 +108,12 @@ public class AlpValuesReaderForFloat extends AlpValuesReader {
     // Overwrite exception slots with their original float values
     if (numExceptions > 0) {
       for (int e = 0; e < numExceptions; e++) {
-        excPositionsBuffer[e] = getShortLE(vectorsData, pos) & 0xFFFF;
+        int excPos = getShortLE(vectorsData, pos) & 0xFFFF;
+        if (excPos >= vectorLen) {
+          throw new ParquetDecodingException(
+              "ALP exception position " + excPos + " exceeds vector length " + vectorLen);
+        }
+        excPositionsBuffer[e] = excPos;
         pos += Short.BYTES;
       }
       for (int e = 0; e < numExceptions; e++) {
