@@ -28,7 +28,6 @@ import java.io.IOException;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.example.data.Group;
 import org.apache.parquet.example.data.simple.convert.GroupRecordConverter;
@@ -59,17 +58,14 @@ public class TestInterOpReadAlp {
   private static final Logger LOG = LoggerFactory.getLogger(TestInterOpReadAlp.class);
 
   private static final String[] CPP_DOUBLE_FILES = {"alp_spotify1.parquet", "alp_arade.parquet"};
-  private static final String[] CPP_FLOAT_FILES = {
-    "alp_float_spotify1.parquet", "alp_float_arade.parquet"
-  };
+  private static final String[] CPP_FLOAT_FILES = {"alp_float_spotify1.parquet", "alp_float_arade.parquet"};
 
   private java.nio.file.Path getTestDataDir() {
     String dir = System.getProperty("ALP_TEST_DATA_DIR");
     if (dir == null) dir = System.getenv("ALP_TEST_DATA_DIR");
     if (dir != null && new File(dir).isDirectory()) return Paths.get(dir);
     // Default: alp-test-data/ relative to project root (two levels up from target/test-classes)
-    java.nio.file.Path candidate =
-        Paths.get(System.getProperty("user.dir")).resolve("alp-test-data");
+    java.nio.file.Path candidate = Paths.get(System.getProperty("user.dir")).resolve("alp-test-data");
     return candidate.toFile().isDirectory() ? candidate : null;
   }
 
@@ -90,8 +86,7 @@ public class TestInterOpReadAlp {
       PageReadStore pages;
       while ((pages = reader.readNextRowGroup()) != null) {
         long rowCount = pages.getRowCount();
-        RecordReader<Group> recordReader =
-            columnIO.getRecordReader(pages, new GroupRecordConverter(schema));
+        RecordReader<Group> recordReader = columnIO.getRecordReader(pages, new GroupRecordConverter(schema));
         for (long i = 0; i < rowCount; i++) {
           rows.add(recordReader.read());
         }
@@ -141,10 +136,7 @@ public class TestInterOpReadAlp {
     java.nio.file.Path dir = getTestDataDir();
     assumeTrue("alp-test-data/ directory not found, skipping", dir != null);
     String[] allFiles = {
-      "alp_spotify1.parquet",
-      "alp_arade.parquet",
-      "alp_float_spotify1.parquet",
-      "alp_float_arade.parquet"
+      "alp_spotify1.parquet", "alp_arade.parquet", "alp_float_spotify1.parquet", "alp_float_arade.parquet"
     };
     for (String filename : allFiles) {
       java.nio.file.Path file = dir.resolve(filename);
@@ -182,8 +174,7 @@ public class TestInterOpReadAlp {
           }
         }
       }
-      LOG.info(
-          "{}: {} values, {} NaN, {} Inf", filename, totalValues, nanCount, infCount);
+      LOG.info("{}: {} values, {} NaN, {} Inf", filename, totalValues, nanCount, infCount);
       assertEquals("Unexpected NaN in " + filename, 0, nanCount);
       assertEquals("Unexpected Inf in " + filename, 0, infCount);
     }
@@ -195,10 +186,7 @@ public class TestInterOpReadAlp {
     java.nio.file.Path dir = getTestDataDir();
     assumeTrue("alp-test-data/ directory not found, skipping", dir != null);
     String[] allFiles = {
-      "alp_spotify1.parquet",
-      "alp_arade.parquet",
-      "alp_float_spotify1.parquet",
-      "alp_float_arade.parquet"
+      "alp_spotify1.parquet", "alp_arade.parquet", "alp_float_spotify1.parquet", "alp_float_arade.parquet"
     };
     for (String filename : allFiles) {
       java.nio.file.Path file = dir.resolve(filename);
@@ -230,7 +218,7 @@ public class TestInterOpReadAlp {
   /*
   @Test
   public void testReadAlpFromParquetTesting() throws IOException {
-    // InterOpTester will auto-download from parquet-testing
+  // InterOpTester will auto-download from parquet-testing
   }
   */
 }

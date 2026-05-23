@@ -201,11 +201,9 @@ final class AlpEncoderDecoder {
         }
         int nonExceptions = length - exceptions;
         if (nonExceptions == 0) continue;
-        long delta = (nonExceptions < 2) ? 0 :
-            (long) maxEncoded - (long) minEncoded;
+        long delta = (nonExceptions < 2) ? 0 : (long) maxEncoded - (long) minEncoded;
         int bitsPerValue = (delta == 0) ? 0 : (64 - Long.numberOfLeadingZeros(delta));
-        long estimatedSize = (long) length * bitsPerValue
-            + (long) exceptions * (Float.SIZE + Short.SIZE);
+        long estimatedSize = (long) length * bitsPerValue + (long) exceptions * (Float.SIZE + Short.SIZE);
         if (estimatedSize < bestEstimatedSize
             || (estimatedSize == bestEstimatedSize
                 && (e > bestExponent || (e == bestExponent && f > bestFactor)))) {
@@ -247,11 +245,9 @@ final class AlpEncoderDecoder {
       }
       int nonExceptions = length - exceptions;
       if (nonExceptions == 0) continue;
-      long delta = (nonExceptions < 2) ? 0 :
-          (long) maxEncoded - (long) minEncoded;
+      long delta = (nonExceptions < 2) ? 0 : (long) maxEncoded - (long) minEncoded;
       int bitsPerValue = (delta == 0) ? 0 : (64 - Long.numberOfLeadingZeros(delta));
-      long estimatedSize = (long) length * bitsPerValue
-          + (long) exceptions * (Float.SIZE + Short.SIZE);
+      long estimatedSize = (long) length * bitsPerValue + (long) exceptions * (Float.SIZE + Short.SIZE);
       if (estimatedSize < bestEstimatedSize
           || (estimatedSize == bestEstimatedSize
               && (e > bestExponent || (e == bestExponent && f > bestFactor)))) {
@@ -295,8 +291,7 @@ final class AlpEncoderDecoder {
         // correctly even when the subtraction overflows (large range → penalized with 64 bits).
         long delta = (nonExceptions < 2) ? 0 : (maxEncoded - minEncoded);
         int bitsPerValue = (delta == 0) ? 0 : (64 - Long.numberOfLeadingZeros(delta));
-        long estimatedSize = (long) length * bitsPerValue
-            + (long) exceptions * (Double.SIZE + Short.SIZE);
+        long estimatedSize = (long) length * bitsPerValue + (long) exceptions * (Double.SIZE + Short.SIZE);
         if (estimatedSize < bestEstimatedSize
             || (estimatedSize == bestEstimatedSize
                 && (e > bestExponent || (e == bestExponent && f > bestFactor)))) {
@@ -340,8 +335,7 @@ final class AlpEncoderDecoder {
       if (nonExceptions == 0) continue;
       long delta = (nonExceptions < 2) ? 0 : (maxEncoded - minEncoded);
       int bitsPerValue = (delta == 0) ? 0 : (64 - Long.numberOfLeadingZeros(delta));
-      long estimatedSize = (long) length * bitsPerValue
-          + (long) exceptions * (Double.SIZE + Short.SIZE);
+      long estimatedSize = (long) length * bitsPerValue + (long) exceptions * (Double.SIZE + Short.SIZE);
       if (estimatedSize < bestEstimatedSize
           || (estimatedSize == bestEstimatedSize
               && (e > bestExponent || (e == bestExponent && f > bestFactor)))) {

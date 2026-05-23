@@ -126,9 +126,8 @@ abstract class AlpValuesReader extends ValuesReader {
   protected int getVectorDataPosition(int vectorIdx) {
     int pos = vectorOffsets[vectorIdx] - offsetArraySize;
     if (pos < 0 || pos >= vectorsData.limit()) {
-      throw new ParquetDecodingException(
-          "ALP vector offset out of bounds: vectorIdx=" + vectorIdx + ", computed position=" + pos
-              + ", buffer limit=" + vectorsData.limit());
+      throw new ParquetDecodingException("ALP vector offset out of bounds: vectorIdx=" + vectorIdx
+          + ", computed position=" + pos + ", buffer limit=" + vectorsData.limit());
     }
     return pos;
   }

@@ -22,7 +22,6 @@ import static org.apache.parquet.column.values.alp.AlpConstants.*;
 import static org.junit.Assert.*;
 
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.bytes.DirectByteBufferAllocator;
@@ -84,7 +83,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testInvalidCompressionMode() throws Exception {
-    byte[] page = buildValidFloatPage(new float[]{1.0f, 2.0f, 3.0f}, DEFAULT_VECTOR_SIZE);
+    byte[] page = buildValidFloatPage(new float[] {1.0f, 2.0f, 3.0f}, DEFAULT_VECTOR_SIZE);
     // Byte 0 is compressionMode
     page[0] = 1;
     AlpValuesReaderForFloat reader = new AlpValuesReaderForFloat();
@@ -98,7 +97,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testInvalidIntegerEncoding() throws Exception {
-    byte[] page = buildValidFloatPage(new float[]{1.0f, 2.0f, 3.0f}, DEFAULT_VECTOR_SIZE);
+    byte[] page = buildValidFloatPage(new float[] {1.0f, 2.0f, 3.0f}, DEFAULT_VECTOR_SIZE);
     // Byte 1 is integerEncoding
     page[1] = 5;
     AlpValuesReaderForFloat reader = new AlpValuesReaderForFloat();
@@ -112,7 +111,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testInvalidLogVectorSizeTooSmall() throws Exception {
-    byte[] page = buildValidFloatPage(new float[]{1.0f, 2.0f, 3.0f}, DEFAULT_VECTOR_SIZE);
+    byte[] page = buildValidFloatPage(new float[] {1.0f, 2.0f, 3.0f}, DEFAULT_VECTOR_SIZE);
     // Byte 2 is logVectorSize
     page[2] = 2; // below minimum of 3
     AlpValuesReaderForFloat reader = new AlpValuesReaderForFloat();
@@ -126,7 +125,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testInvalidLogVectorSizeTooLarge() throws Exception {
-    byte[] page = buildValidFloatPage(new float[]{1.0f, 2.0f, 3.0f}, DEFAULT_VECTOR_SIZE);
+    byte[] page = buildValidFloatPage(new float[] {1.0f, 2.0f, 3.0f}, DEFAULT_VECTOR_SIZE);
     // Byte 2 is logVectorSize
     page[2] = 16; // above maximum of 15
     AlpValuesReaderForFloat reader = new AlpValuesReaderForFloat();
@@ -140,7 +139,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testNegativeNumElements() throws Exception {
-    byte[] page = buildValidFloatPage(new float[]{1.0f, 2.0f, 3.0f}, DEFAULT_VECTOR_SIZE);
+    byte[] page = buildValidFloatPage(new float[] {1.0f, 2.0f, 3.0f}, DEFAULT_VECTOR_SIZE);
     // Bytes 3-6 are numElements (little-endian int)
     putIntLE(page, 3, -1);
     AlpValuesReaderForFloat reader = new AlpValuesReaderForFloat();
@@ -156,7 +155,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testNumElementsExceedsStreamSize() throws Exception {
-    byte[] page = buildValidFloatPage(new float[]{1.0f, 2.0f, 3.0f}, DEFAULT_VECTOR_SIZE);
+    byte[] page = buildValidFloatPage(new float[] {1.0f, 2.0f, 3.0f}, DEFAULT_VECTOR_SIZE);
     // Set numElements to a huge value — requires massive offset array
     putIntLE(page, 3, Integer.MAX_VALUE);
     // Set logVectorSize to minimum (3 → vectorSize=8) to maximize numVectors
@@ -174,7 +173,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testCorruptedVectorOffsetNegativePosition() throws Exception {
-    byte[] page = buildValidFloatPage(new float[]{1.0f, 2.0f, 3.0f}, DEFAULT_VECTOR_SIZE);
+    byte[] page = buildValidFloatPage(new float[] {1.0f, 2.0f, 3.0f}, DEFAULT_VECTOR_SIZE);
     // Offset array starts at byte 7 (after header). Set first offset to 0, which produces
     // negative position: 0 - offsetArraySize < 0
     putIntLE(page, ALP_HEADER_SIZE, 0);
@@ -190,7 +189,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testCorruptedVectorOffsetTooLarge() throws Exception {
-    byte[] page = buildValidFloatPage(new float[]{1.0f, 2.0f, 3.0f}, DEFAULT_VECTOR_SIZE);
+    byte[] page = buildValidFloatPage(new float[] {1.0f, 2.0f, 3.0f}, DEFAULT_VECTOR_SIZE);
     // Set first offset to MAX_INT
     putIntLE(page, ALP_HEADER_SIZE, Integer.MAX_VALUE);
     AlpValuesReaderForFloat reader = new AlpValuesReaderForFloat();
@@ -207,7 +206,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testCorruptedExponentFloat() throws Exception {
-    float[] values = new float[]{1.23f, 4.56f, 7.89f};
+    float[] values = new float[] {1.23f, 4.56f, 7.89f};
     byte[] page = buildValidFloatPage(values, DEFAULT_VECTOR_SIZE);
     // Find vector data start: header(7) + offsetArray(4 * numVectors)
     // numVectors = 1 for 3 values with vectorSize=1024
@@ -236,7 +235,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testCorruptedFactorFloat() throws Exception {
-    float[] values = new float[]{1.23f, 4.56f, 7.89f};
+    float[] values = new float[] {1.23f, 4.56f, 7.89f};
     byte[] page = buildValidFloatPage(values, DEFAULT_VECTOR_SIZE);
     int offsetArraySize = 4;
     int vectorOffset = getIntLE(page, ALP_HEADER_SIZE);
@@ -255,7 +254,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testCorruptedExponentDouble() throws Exception {
-    double[] values = new double[]{1.23, 4.56, 7.89};
+    double[] values = new double[] {1.23, 4.56, 7.89};
     byte[] page = buildValidDoublePage(values, DEFAULT_VECTOR_SIZE);
     int offsetArraySize = 4;
     int vectorOffset = getIntLE(page, ALP_HEADER_SIZE);
@@ -274,7 +273,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testCorruptedFactorDouble() throws Exception {
-    double[] values = new double[]{1.23, 4.56, 7.89};
+    double[] values = new double[] {1.23, 4.56, 7.89};
     byte[] page = buildValidDoublePage(values, DEFAULT_VECTOR_SIZE);
     int offsetArraySize = 4;
     int vectorOffset = getIntLE(page, ALP_HEADER_SIZE);
@@ -295,7 +294,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testCorruptedBitWidthFloat() throws Exception {
-    float[] values = new float[]{1.23f, 4.56f, 7.89f};
+    float[] values = new float[] {1.23f, 4.56f, 7.89f};
     byte[] page = buildValidFloatPage(values, DEFAULT_VECTOR_SIZE);
     int offsetArraySize = 4;
     int vectorOffset = getIntLE(page, ALP_HEADER_SIZE);
@@ -315,7 +314,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testCorruptedBitWidthDouble() throws Exception {
-    double[] values = new double[]{1.23, 4.56, 7.89};
+    double[] values = new double[] {1.23, 4.56, 7.89};
     byte[] page = buildValidDoublePage(values, DEFAULT_VECTOR_SIZE);
     int offsetArraySize = 4;
     int vectorOffset = getIntLE(page, ALP_HEADER_SIZE);
@@ -337,7 +336,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testCorruptedNumExceptionsFloat() throws Exception {
-    float[] values = new float[]{1.23f, 4.56f, 7.89f};
+    float[] values = new float[] {1.23f, 4.56f, 7.89f};
     byte[] page = buildValidFloatPage(values, DEFAULT_VECTOR_SIZE);
     int offsetArraySize = 4;
     int vectorOffset = getIntLE(page, ALP_HEADER_SIZE);
@@ -359,7 +358,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testCorruptedNumExceptionsDouble() throws Exception {
-    double[] values = new double[]{1.23, 4.56, 7.89};
+    double[] values = new double[] {1.23, 4.56, 7.89};
     byte[] page = buildValidDoublePage(values, DEFAULT_VECTOR_SIZE);
     int offsetArraySize = 4;
     int vectorOffset = getIntLE(page, ALP_HEADER_SIZE);
@@ -382,7 +381,7 @@ public class AlpCorruptedDataTest {
   @Test
   public void testCorruptedExceptionPositionFloat() throws Exception {
     // Use values that will generate exceptions (NaN, Inf)
-    float[] values = new float[]{1.23f, Float.NaN, 3.45f, Float.POSITIVE_INFINITY, 5.67f};
+    float[] values = new float[] {1.23f, Float.NaN, 3.45f, Float.POSITIVE_INFINITY, 5.67f};
     byte[] page = buildValidFloatPage(values, DEFAULT_VECTOR_SIZE);
     int offsetArraySize = 4;
     int vectorOffset = getIntLE(page, ALP_HEADER_SIZE);
@@ -396,7 +395,8 @@ public class AlpCorruptedDataTest {
       int bitWidth = page[ALP_HEADER_SIZE + offsetArraySize + pos + ALP_INFO_SIZE + 4] & 0xFF;
       int vectorLen = 5;
       int packedBytesSize = (bitWidth > 0) ? (vectorLen * bitWidth + 7) / 8 : 0;
-      int excPosStart = ALP_HEADER_SIZE + offsetArraySize + pos + ALP_INFO_SIZE + FLOAT_FOR_INFO_SIZE + packedBytesSize;
+      int excPosStart =
+          ALP_HEADER_SIZE + offsetArraySize + pos + ALP_INFO_SIZE + FLOAT_FOR_INFO_SIZE + packedBytesSize;
       // Set first exception position to 60000 (way beyond vectorLen=5)
       page[excPosStart] = (byte) 0x60;
       page[excPosStart + 1] = (byte) 0xEA; // 60000 = 0xEA60 in LE
@@ -414,7 +414,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testCorruptedExceptionPositionDouble() throws Exception {
-    double[] values = new double[]{1.23, Double.NaN, 3.45, Double.POSITIVE_INFINITY, 5.67};
+    double[] values = new double[] {1.23, Double.NaN, 3.45, Double.POSITIVE_INFINITY, 5.67};
     byte[] page = buildValidDoublePage(values, DEFAULT_VECTOR_SIZE);
     int offsetArraySize = 4;
     int vectorOffset = getIntLE(page, ALP_HEADER_SIZE);
@@ -425,7 +425,8 @@ public class AlpCorruptedDataTest {
       int bitWidth = page[ALP_HEADER_SIZE + offsetArraySize + pos + ALP_INFO_SIZE + 8] & 0xFF;
       int vectorLen = 5;
       int packedBytesSize = (bitWidth > 0) ? (vectorLen * bitWidth + 7) / 8 : 0;
-      int excPosStart = ALP_HEADER_SIZE + offsetArraySize + pos + ALP_INFO_SIZE + DOUBLE_FOR_INFO_SIZE + packedBytesSize;
+      int excPosStart =
+          ALP_HEADER_SIZE + offsetArraySize + pos + ALP_INFO_SIZE + DOUBLE_FOR_INFO_SIZE + packedBytesSize;
       // Set first exception position to 60000 (way beyond vectorLen=5)
       page[excPosStart] = (byte) 0x60;
       page[excPosStart + 1] = (byte) 0xEA; // 60000 = 0xEA60 in LE
@@ -446,7 +447,7 @@ public class AlpCorruptedDataTest {
   @Test
   public void testMaxValidExponentFloat() throws Exception {
     // exponent=10 (max) should still work
-    float[] values = new float[]{1.23f, 4.56f, 7.89f};
+    float[] values = new float[] {1.23f, 4.56f, 7.89f};
     byte[] page = buildValidFloatPage(values, DEFAULT_VECTOR_SIZE);
     // Verify we can still read valid data without issues
     AlpValuesReaderForFloat reader = new AlpValuesReaderForFloat();
@@ -458,7 +459,7 @@ public class AlpCorruptedDataTest {
 
   @Test
   public void testMaxValidExponentDouble() throws Exception {
-    double[] values = new double[]{1.23, 4.56, 7.89};
+    double[] values = new double[] {1.23, 4.56, 7.89};
     byte[] page = buildValidDoublePage(values, DEFAULT_VECTOR_SIZE);
     AlpValuesReaderForDouble reader = new AlpValuesReaderForDouble();
     reader.initFromPage(3, wrapBytes(page));
