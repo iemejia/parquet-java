@@ -133,5 +133,4 @@ public class AlpValuesReaderForDouble extends AlpValuesReader {
 
     return pos;
   }
-
 }

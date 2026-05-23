@@ -64,8 +64,8 @@ public class AlpValuesEndToEndTest {
         float actual = reader.readFloat();
 
         assertEquals(
-            "Value mismatch at index " + i + " for " + expected
-                + " (bits: 0x" + Integer.toHexString(Float.floatToRawIntBits(expected)) + ")",
+            "Value mismatch at index " + i + " for " + expected + " (bits: 0x"
+                + Integer.toHexString(Float.floatToRawIntBits(expected)) + ")",
             Float.floatToRawIntBits(expected),
             Float.floatToRawIntBits(actual));
       }
@@ -101,8 +101,8 @@ public class AlpValuesEndToEndTest {
         double actual = reader.readDouble();
 
         assertEquals(
-            "Value mismatch at index " + i + " for " + expected
-                + " (bits: 0x" + Long.toHexString(Double.doubleToRawLongBits(expected)) + ")",
+            "Value mismatch at index " + i + " for " + expected + " (bits: 0x"
+                + Long.toHexString(Double.doubleToRawLongBits(expected)) + ")",
             Double.doubleToRawLongBits(expected),
             Double.doubleToRawLongBits(actual));
       }
@@ -1436,9 +1436,8 @@ public class AlpValuesEndToEndTest {
     int v1DataSize = 4 + 5 + v1PackedSize; // 10
     int offsetArraySize = numVectors * 4; // 8
 
-    ByteBuffer page =
-        ByteBuffer.allocate(7 + offsetArraySize + v0DataSize + v1DataSize)
-            .order(ByteOrder.LITTLE_ENDIAN);
+    ByteBuffer page = ByteBuffer.allocate(7 + offsetArraySize + v0DataSize + v1DataSize)
+        .order(ByteOrder.LITTLE_ENDIAN);
 
     // Header (7 bytes)
     page.put((byte) 0); // compression_mode
@@ -1475,9 +1474,7 @@ public class AlpValuesEndToEndTest {
       float expected = (float) (i + 1);
       float actual = reader.readFloat();
       assertEquals(
-          "Value mismatch at index " + i,
-          Float.floatToRawIntBits(expected),
-          Float.floatToRawIntBits(actual));
+          "Value mismatch at index " + i, Float.floatToRawIntBits(expected), Float.floatToRawIntBits(actual));
     }
   }
 
@@ -1508,9 +1505,8 @@ public class AlpValuesEndToEndTest {
     int v1DataSize = 4 + 5 + 1;
     int offsetArraySize = numVectors * 4;
 
-    ByteBuffer page =
-        ByteBuffer.allocate(7 + offsetArraySize + v0DataSize + v1DataSize)
-            .order(ByteOrder.LITTLE_ENDIAN);
+    ByteBuffer page = ByteBuffer.allocate(7 + offsetArraySize + v0DataSize + v1DataSize)
+        .order(ByteOrder.LITTLE_ENDIAN);
 
     page.put((byte) 0).put((byte) 0).put((byte) 3);
     page.putInt(numElements);
@@ -1570,9 +1566,7 @@ public class AlpValuesEndToEndTest {
       reader.initFromPage(10, ByteBufferInputStream.wrap(input.toByteBuffer()));
 
       for (int i = 0; i < 10; i++) {
-        assertEquals(
-            Float.floatToRawIntBits(i * 1.0f),
-            Float.floatToRawIntBits(reader.readFloat()));
+        assertEquals(Float.floatToRawIntBits(i * 1.0f), Float.floatToRawIntBits(reader.readFloat()));
       }
     } finally {
       if (writer != null) {
@@ -1599,8 +1593,7 @@ public class AlpValuesEndToEndTest {
     }
 
     // Verify the best params actually have f > 0 or f == 0 with low exceptions
-    AlpEncoderDecoder.EncodingParams params =
-        AlpEncoderDecoder.findBestDoubleParams(values, 0, values.length);
+    AlpEncoderDecoder.EncodingParams params = AlpEncoderDecoder.findBestDoubleParams(values, 0, values.length);
     // Regardless of the chosen f, the roundtrip must be lossless
     roundTripDouble(values);
   }
@@ -1624,15 +1617,15 @@ public class AlpValuesEndToEndTest {
   @Test
   public void testDoubleNearOverflowBoundary() throws Exception {
     double[] values = {
-        9.2e18,         // near Long.MAX_VALUE
-        -9.2e18,        // near Long.MIN_VALUE
-        1.7e308,        // near Double.MAX_VALUE
-        -1.7e308,       // near -Double.MAX_VALUE
-        4.9e-324,       // Double.MIN_VALUE (subnormal)
-        1.0e18,         // large but in range
-        -1.0e18,        // large negative but in range
-        0.0,            // normal
-        1.23,           // normal
+      9.2e18, // near Long.MAX_VALUE
+      -9.2e18, // near Long.MIN_VALUE
+      1.7e308, // near Double.MAX_VALUE
+      -1.7e308, // near -Double.MAX_VALUE
+      4.9e-324, // Double.MIN_VALUE (subnormal)
+      1.0e18, // large but in range
+      -1.0e18, // large negative but in range
+      0.0, // normal
+      1.23, // normal
     };
     roundTripDouble(values);
   }
@@ -1640,14 +1633,14 @@ public class AlpValuesEndToEndTest {
   @Test
   public void testFloatNearOverflowBoundary() throws Exception {
     float[] values = {
-        2.1e9f,          // near Integer.MAX_VALUE
-        -2.1e9f,         // near Integer.MIN_VALUE
-        3.4e38f,         // near Float.MAX_VALUE
-        -3.4e38f,        // near -Float.MAX_VALUE
-        1.4e-45f,        // Float.MIN_VALUE (subnormal)
-        1.0e9f,          // large but in range
-        0.0f,            // normal
-        1.23f,           // normal
+      2.1e9f, // near Integer.MAX_VALUE
+      -2.1e9f, // near Integer.MIN_VALUE
+      3.4e38f, // near Float.MAX_VALUE
+      -3.4e38f, // near -Float.MAX_VALUE
+      1.4e-45f, // Float.MIN_VALUE (subnormal)
+      1.0e9f, // large but in range
+      0.0f, // normal
+      1.23f, // normal
     };
     roundTripFloat(values);
   }
@@ -1685,10 +1678,18 @@ public class AlpValuesEndToEndTest {
     float[] values = new float[DEFAULT_VECTOR_SIZE + 5]; // partial second vector
     for (int i = 0; i < values.length; i++) {
       switch (i % 4) {
-        case 0: values[i] = Float.NaN; break;
-        case 1: values[i] = Float.POSITIVE_INFINITY; break;
-        case 2: values[i] = Float.NEGATIVE_INFINITY; break;
-        case 3: values[i] = -0.0f; break;
+        case 0:
+          values[i] = Float.NaN;
+          break;
+        case 1:
+          values[i] = Float.POSITIVE_INFINITY;
+          break;
+        case 2:
+          values[i] = Float.NEGATIVE_INFINITY;
+          break;
+        case 3:
+          values[i] = -0.0f;
+          break;
       }
     }
     roundTripFloat(values);
@@ -1699,10 +1700,18 @@ public class AlpValuesEndToEndTest {
     double[] values = new double[DEFAULT_VECTOR_SIZE + 5];
     for (int i = 0; i < values.length; i++) {
       switch (i % 4) {
-        case 0: values[i] = Double.NaN; break;
-        case 1: values[i] = Double.POSITIVE_INFINITY; break;
-        case 2: values[i] = Double.NEGATIVE_INFINITY; break;
-        case 3: values[i] = -0.0; break;
+        case 0:
+          values[i] = Double.NaN;
+          break;
+        case 1:
+          values[i] = Double.POSITIVE_INFINITY;
+          break;
+        case 2:
+          values[i] = Double.NEGATIVE_INFINITY;
+          break;
+        case 3:
+          values[i] = -0.0;
+          break;
       }
     }
     roundTripDouble(values);
@@ -1749,19 +1758,20 @@ public class AlpValuesEndToEndTest {
   public void testFloatEncodingLimitBoundary() throws Exception {
     // Values within magic-trick precision range (< 2^23 = 8388608) that should encode
     float withinPrecision = 8000000.0f;
-    assertFalse("8M should encode at e=0,f=0",
-        AlpEncoderDecoder.isFloatException(withinPrecision, 0, 0));
+    assertFalse("8M should encode at e=0,f=0", AlpEncoderDecoder.isFloatException(withinPrecision, 0, 0));
 
     // Values above limit are always exceptions
     float aboveLimit = 2200000000.0f;
-    assertTrue("Value above FLOAT_ENCODING_UPPER_LIMIT should be exception",
+    assertTrue(
+        "Value above FLOAT_ENCODING_UPPER_LIMIT should be exception",
         AlpEncoderDecoder.isFloatException(aboveLimit, 0, 0));
 
     // Values at the encoding limit may be exceptions due to magic-trick precision loss
     float atLimit = 2147483520.0f;
     // Whether it's an exception depends on the magic trick — verify round-trip handles it
-    float[] values = {atLimit, -atLimit, aboveLimit, -aboveLimit,
-        withinPrecision, -withinPrecision, 1.0f, 100.0f, 0.0f, 42.0f};
+    float[] values = {
+      atLimit, -atLimit, aboveLimit, -aboveLimit, withinPrecision, -withinPrecision, 1.0f, 100.0f, 0.0f, 42.0f
+    };
     roundTripFloat(values);
   }
 
@@ -1773,20 +1783,30 @@ public class AlpValuesEndToEndTest {
   public void testDoubleEncodingLimitBoundary() throws Exception {
     // Values within magic-trick precision (< 2^52)
     double withinPrecision = 4.0e15;
-    assertFalse("4e15 should encode at e=0,f=0",
-        AlpEncoderDecoder.isDoubleException(withinPrecision, 0, 0));
+    assertFalse("4e15 should encode at e=0,f=0", AlpEncoderDecoder.isDoubleException(withinPrecision, 0, 0));
 
     // Values above the encoding upper limit are always exceptions
     double aboveLimit = 9.3e18;
-    assertTrue("Value above ENCODING_UPPER_LIMIT should be exception",
+    assertTrue(
+        "Value above ENCODING_UPPER_LIMIT should be exception",
         AlpEncoderDecoder.isDoubleException(aboveLimit, 0, 0));
 
     // Large values within range but above magic-trick precision → may be exceptions
     double abovePrecision = 5.0e15; // above 2^52, round-trip may fail
     // Don't assert exception status — just verify round-trip through pipeline handles it
 
-    double[] values = {withinPrecision, -withinPrecision, aboveLimit, -aboveLimit,
-        abovePrecision, -abovePrecision, 1.0, 100.0, 0.0, 42.0};
+    double[] values = {
+      withinPrecision,
+      -withinPrecision,
+      aboveLimit,
+      -aboveLimit,
+      abovePrecision,
+      -abovePrecision,
+      1.0,
+      100.0,
+      0.0,
+      42.0
+    };
     roundTripDouble(values);
   }
 
@@ -1801,13 +1821,11 @@ public class AlpValuesEndToEndTest {
     // With e=10: value * 1e10 must be within magic-trick range (< ~8.4M) to encode
     // So max encodable value at e=10 ≈ 8388608 / 1e10 ≈ 0.0000008388608
     float smallValue = 0.0000005f; // 5e-7 * 1e10 = 5000 → within range
-    assertFalse("Small value should encode at e=10",
-        AlpEncoderDecoder.isFloatException(smallValue, 10, 0));
+    assertFalse("Small value should encode at e=10", AlpEncoderDecoder.isFloatException(smallValue, 10, 0));
 
     // Larger value scaled overflows the limit entirely
     float largeValue = 1.0f; // 1.0 * 1e10 = 1e10 > FLOAT_ENCODING_UPPER_LIMIT
-    assertTrue("1.0 scaled by e=10 should overflow",
-        AlpEncoderDecoder.isFloatException(largeValue, 10, 0));
+    assertTrue("1.0 scaled by e=10 should overflow", AlpEncoderDecoder.isFloatException(largeValue, 10, 0));
 
     // Mix values near limits with normal values — pipeline should handle all
     float[] values = new float[32];
@@ -1914,9 +1932,16 @@ public class AlpValuesEndToEndTest {
     // At e=0, f=0: encode(value) ≈ round(value)
     // Use values near the int boundaries
     float[] values = {
-        -2000000000.0f, -1000000000.0f, 0.0f, 1000000000.0f, 2000000000.0f,
-        -2147483520.0f, 2147483520.0f, // at the limit
-        -1.0f, 1.0f, 42.0f
+      -2000000000.0f,
+      -1000000000.0f,
+      0.0f,
+      1000000000.0f,
+      2000000000.0f,
+      -2147483520.0f,
+      2147483520.0f, // at the limit
+      -1.0f,
+      1.0f,
+      42.0f
     };
     roundTripFloat(values);
   }
@@ -1927,9 +1952,16 @@ public class AlpValuesEndToEndTest {
   @Test
   public void testDoubleFullLongRange() throws Exception {
     double[] values = {
-        -9.0e18, -1.0e18, 0.0, 1.0e18, 9.0e18,
-        -9223372036854774784.0, 9223372036854774784.0, // at the limit
-        -1.0, 1.0, 42.0
+      -9.0e18,
+      -1.0e18,
+      0.0,
+      1.0e18,
+      9.0e18,
+      -9223372036854774784.0,
+      9223372036854774784.0, // at the limit
+      -1.0,
+      1.0,
+      42.0
     };
     roundTripDouble(values);
   }
@@ -2250,13 +2282,15 @@ public class AlpValuesEndToEndTest {
   @Test
   public void testFloatSubnormals() throws Exception {
     float[] values = {
-        Float.MIN_VALUE, // smallest positive subnormal
-        Float.MIN_VALUE * 2,
-        Float.MIN_VALUE * 100,
-        Float.MIN_NORMAL, // smallest normal
-        -Float.MIN_VALUE,
-        -Float.MIN_NORMAL,
-        1.0f, 2.0f, 3.0f // some normal values mixed in
+      Float.MIN_VALUE, // smallest positive subnormal
+      Float.MIN_VALUE * 2,
+      Float.MIN_VALUE * 100,
+      Float.MIN_NORMAL, // smallest normal
+      -Float.MIN_VALUE,
+      -Float.MIN_NORMAL,
+      1.0f,
+      2.0f,
+      3.0f // some normal values mixed in
     };
     roundTripFloat(values);
   }
@@ -2264,13 +2298,15 @@ public class AlpValuesEndToEndTest {
   @Test
   public void testDoubleSubnormals() throws Exception {
     double[] values = {
-        Double.MIN_VALUE, // smallest positive subnormal
-        Double.MIN_VALUE * 2,
-        Double.MIN_VALUE * 100,
-        Double.MIN_NORMAL, // smallest normal
-        -Double.MIN_VALUE,
-        -Double.MIN_NORMAL,
-        1.0, 2.0, 3.0
+      Double.MIN_VALUE, // smallest positive subnormal
+      Double.MIN_VALUE * 2,
+      Double.MIN_VALUE * 100,
+      Double.MIN_NORMAL, // smallest normal
+      -Double.MIN_VALUE,
+      -Double.MIN_NORMAL,
+      1.0,
+      2.0,
+      3.0
     };
     roundTripDouble(values);
   }
@@ -2278,21 +2314,13 @@ public class AlpValuesEndToEndTest {
   /** MAX_VALUE — largest finite value. */
   @Test
   public void testFloatMaxValue() throws Exception {
-    float[] values = {
-        Float.MAX_VALUE, -Float.MAX_VALUE,
-        Float.MAX_VALUE / 2, -Float.MAX_VALUE / 2,
-        1.0f, 0.0f
-    };
+    float[] values = {Float.MAX_VALUE, -Float.MAX_VALUE, Float.MAX_VALUE / 2, -Float.MAX_VALUE / 2, 1.0f, 0.0f};
     roundTripFloat(values);
   }
 
   @Test
   public void testDoubleMaxValue() throws Exception {
-    double[] values = {
-        Double.MAX_VALUE, -Double.MAX_VALUE,
-        Double.MAX_VALUE / 2, -Double.MAX_VALUE / 2,
-        1.0, 0.0
-    };
+    double[] values = {Double.MAX_VALUE, -Double.MAX_VALUE, Double.MAX_VALUE / 2, -Double.MAX_VALUE / 2, 1.0, 0.0};
     roundTripDouble(values);
   }
 
@@ -2306,8 +2334,10 @@ public class AlpValuesEndToEndTest {
     roundTripFloat(values);
 
     // Verify the bit patterns are distinct
-    assertNotEquals("0.0f and -0.0f should have different bits",
-        Float.floatToRawIntBits(0.0f), Float.floatToRawIntBits(-0.0f));
+    assertNotEquals(
+        "0.0f and -0.0f should have different bits",
+        Float.floatToRawIntBits(0.0f),
+        Float.floatToRawIntBits(-0.0f));
   }
 
   @Test
@@ -2323,14 +2353,16 @@ public class AlpValuesEndToEndTest {
   @Test
   public void testFloatMultipleNanPayloads() throws Exception {
     float[] values = {
-        Float.intBitsToFloat(0x7FC00000), // quiet NaN (default)
-        Float.intBitsToFloat(0x7FC00001), // quiet NaN with payload 1
-        Float.intBitsToFloat(0x7FC0DEAD), // quiet NaN with custom payload
-        Float.intBitsToFloat(0x7F800001), // signaling NaN
-        Float.intBitsToFloat(0x7FBFFFFF), // signaling NaN with max payload
-        Float.intBitsToFloat(0xFFC00000), // negative quiet NaN
-        Float.intBitsToFloat(0xFF800001), // negative signaling NaN
-        1.0f, 2.0f, 3.0f // some normal values
+      Float.intBitsToFloat(0x7FC00000), // quiet NaN (default)
+      Float.intBitsToFloat(0x7FC00001), // quiet NaN with payload 1
+      Float.intBitsToFloat(0x7FC0DEAD), // quiet NaN with custom payload
+      Float.intBitsToFloat(0x7F800001), // signaling NaN
+      Float.intBitsToFloat(0x7FBFFFFF), // signaling NaN with max payload
+      Float.intBitsToFloat(0xFFC00000), // negative quiet NaN
+      Float.intBitsToFloat(0xFF800001), // negative signaling NaN
+      1.0f,
+      2.0f,
+      3.0f // some normal values
     };
     roundTripFloat(values);
   }
@@ -2338,14 +2370,16 @@ public class AlpValuesEndToEndTest {
   @Test
   public void testDoubleMultipleNanPayloads() throws Exception {
     double[] values = {
-        Double.longBitsToDouble(0x7FF8000000000000L), // quiet NaN (default)
-        Double.longBitsToDouble(0x7FF8000000000001L), // quiet NaN with payload 1
-        Double.longBitsToDouble(0x7FF800000000DEADL), // quiet NaN with custom payload
-        Double.longBitsToDouble(0x7FF0000000000001L), // signaling NaN
-        Double.longBitsToDouble(0x7FF7FFFFFFFFFFFFL), // signaling NaN with max payload
-        Double.longBitsToDouble(0xFFF8000000000000L), // negative quiet NaN
-        Double.longBitsToDouble(0xFFF0000000000001L), // negative signaling NaN
-        1.0, 2.0, 3.0
+      Double.longBitsToDouble(0x7FF8000000000000L), // quiet NaN (default)
+      Double.longBitsToDouble(0x7FF8000000000001L), // quiet NaN with payload 1
+      Double.longBitsToDouble(0x7FF800000000DEADL), // quiet NaN with custom payload
+      Double.longBitsToDouble(0x7FF0000000000001L), // signaling NaN
+      Double.longBitsToDouble(0x7FF7FFFFFFFFFFFFL), // signaling NaN with max payload
+      Double.longBitsToDouble(0xFFF8000000000000L), // negative quiet NaN
+      Double.longBitsToDouble(0xFFF0000000000001L), // negative signaling NaN
+      1.0,
+      2.0,
+      3.0
     };
     roundTripDouble(values);
   }

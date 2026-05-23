@@ -121,7 +121,8 @@ public abstract class AlpValuesWriter extends ValuesWriter {
       this.rowgroupSamples = new ArrayList<>();
       // Space samples evenly: one sample every jump vectors across the rowgroup.
       // Math.max(1, ...) guards against very small rowgroups or large vector sizes.
-      this.rowgroupSampleJump = Math.max(1, SAMPLER_ROWGROUP_SIZE / SAMPLER_SAMPLE_VECTORS_PER_ROWGROUP / vectorSize);
+      this.rowgroupSampleJump =
+          Math.max(1, SAMPLER_ROWGROUP_SIZE / SAMPLER_SAMPLE_VECTORS_PER_ROWGROUP / vectorSize);
       // Pre-allocate reusable buffers
       this.encodedBuffer = new int[vectorSize];
       this.excPosBuffer = new short[vectorSize];
@@ -310,8 +311,7 @@ public abstract class AlpValuesWriter extends ValuesWriter {
       // then rank combos by how many samples they win. Take the top MAX_PRESET_COMBINATIONS.
       Map<Long, Integer> comboCounts = new HashMap<>();
       for (float[] sample : rowgroupSamples) {
-        AlpEncoderDecoder.EncodingParams best =
-            AlpEncoderDecoder.findBestFloatParams(sample, 0, sample.length);
+        AlpEncoderDecoder.EncodingParams best = AlpEncoderDecoder.findBestFloatParams(sample, 0, sample.length);
         long key = ((long) best.exponent << Integer.SIZE) | best.factor;
         comboCounts.merge(key, 1, Integer::sum);
       }
@@ -433,7 +433,8 @@ public abstract class AlpValuesWriter extends ValuesWriter {
       this.vectorsProcessed = 0;
       this.cachedPresets = null;
       this.rowgroupSamples = new ArrayList<>();
-      this.rowgroupSampleJump = Math.max(1, SAMPLER_ROWGROUP_SIZE / SAMPLER_SAMPLE_VECTORS_PER_ROWGROUP / vectorSize);
+      this.rowgroupSampleJump =
+          Math.max(1, SAMPLER_ROWGROUP_SIZE / SAMPLER_SAMPLE_VECTORS_PER_ROWGROUP / vectorSize);
       // Pre-allocate reusable buffers
       this.encodedBuffer = new long[vectorSize];
       this.excPosBuffer = new short[vectorSize];
@@ -488,7 +489,8 @@ public abstract class AlpValuesWriter extends ValuesWriter {
         long valueBits = Double.doubleToRawLongBits(value);
 
         // Unconditional exceptions: NaN, Inf, -0.0
-        if (valueBits == DOUBLE_NEGATIVE_ZERO_BITS || (valueBits & 0x7FF0000000000000L) == 0x7FF0000000000000L) {
+        if (valueBits == DOUBLE_NEGATIVE_ZERO_BITS
+            || (valueBits & 0x7FF0000000000000L) == 0x7FF0000000000000L) {
           excPosBuffer[excIdx] = (short) i;
           excValBuffer[excIdx] = value;
           excIdx++;

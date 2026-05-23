@@ -272,8 +272,8 @@ public class AlpEncodingBenchmarks {
 
     @Benchmark
     public BytesInput encodeFloat() throws IOException {
-      AlpValuesWriter.FloatAlpValuesWriter writer =
-          new AlpValuesWriter.FloatAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      AlpValuesWriter.FloatAlpValuesWriter writer = new AlpValuesWriter.FloatAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
       try {
         for (float v : floatData) {
           writer.writeFloat(v);
@@ -287,8 +287,8 @@ public class AlpEncodingBenchmarks {
 
     @Benchmark
     public BytesInput encodeDouble() throws IOException {
-      AlpValuesWriter.DoubleAlpValuesWriter writer =
-          new AlpValuesWriter.DoubleAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      AlpValuesWriter.DoubleAlpValuesWriter writer = new AlpValuesWriter.DoubleAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
       try {
         for (double v : doubleData) {
           writer.writeDouble(v);
@@ -332,10 +332,10 @@ public class AlpEncodingBenchmarks {
       Random rand = new Random(42);
       floatData = generateFloatData(distribution, numValues, rand);
       doubleData = generateDoubleData(distribution, numValues, rand);
-      floatWriter =
-          new AlpValuesWriter.FloatAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
-      doubleWriter =
-          new AlpValuesWriter.DoubleAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      floatWriter = new AlpValuesWriter.FloatAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      doubleWriter = new AlpValuesWriter.DoubleAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
     }
 
     @TearDown(Level.Trial)
@@ -406,16 +406,16 @@ public class AlpEncodingBenchmarks {
       doubleData = generateDoubleData(distribution, BENCH_VALUES, rand);
 
       // Pre-warm writers to activate preset caching
-      floatWriter =
-          new AlpValuesWriter.FloatAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      floatWriter = new AlpValuesWriter.FloatAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
       for (float v : warmupFloats) {
         floatWriter.writeFloat(v);
       }
       floatWriter.getBytes(); // finalize to lock presets
       floatWriter.reset(); // reset for benchmark use — presets remain cached
 
-      doubleWriter =
-          new AlpValuesWriter.DoubleAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      doubleWriter = new AlpValuesWriter.DoubleAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
       for (double v : warmupDoubles) {
         doubleWriter.writeDouble(v);
       }
@@ -539,10 +539,10 @@ public class AlpEncodingBenchmarks {
       Random rand = new Random(42);
       floatData = generateFloatData(distribution, VECTOR_SIZE, rand);
       doubleData = generateDoubleData(distribution, VECTOR_SIZE, rand);
-      floatWriter =
-          new AlpValuesWriter.FloatAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
-      doubleWriter =
-          new AlpValuesWriter.DoubleAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      floatWriter = new AlpValuesWriter.FloatAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      doubleWriter = new AlpValuesWriter.DoubleAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
     }
 
     @TearDown(Level.Trial)
@@ -613,10 +613,22 @@ public class AlpEncodingBenchmarks {
           // Exception: mix of NaN, Inf, subnormal, -0.0
           int excType = rand.nextInt(4);
           switch (excType) {
-            case 0: floatData[i] = Float.NaN; doubleData[i] = Double.NaN; break;
-            case 1: floatData[i] = Float.POSITIVE_INFINITY; doubleData[i] = Double.POSITIVE_INFINITY; break;
-            case 2: floatData[i] = Float.NEGATIVE_INFINITY; doubleData[i] = Double.NEGATIVE_INFINITY; break;
-            case 3: floatData[i] = -0.0f; doubleData[i] = -0.0; break;
+            case 0:
+              floatData[i] = Float.NaN;
+              doubleData[i] = Double.NaN;
+              break;
+            case 1:
+              floatData[i] = Float.POSITIVE_INFINITY;
+              doubleData[i] = Double.POSITIVE_INFINITY;
+              break;
+            case 2:
+              floatData[i] = Float.NEGATIVE_INFINITY;
+              doubleData[i] = Double.NEGATIVE_INFINITY;
+              break;
+            case 3:
+              floatData[i] = -0.0f;
+              doubleData[i] = -0.0;
+              break;
           }
         } else {
           // Clean monetary value
@@ -626,10 +638,10 @@ public class AlpEncodingBenchmarks {
         }
       }
 
-      floatWriter =
-          new AlpValuesWriter.FloatAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
-      doubleWriter =
-          new AlpValuesWriter.DoubleAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      floatWriter = new AlpValuesWriter.FloatAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      doubleWriter = new AlpValuesWriter.DoubleAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
 
       // Pre-encode for decode benchmarks (encode cost excluded from decode measurement)
       for (float v : floatData) floatWriter.writeFloat(v);
@@ -788,10 +800,10 @@ public class AlpEncodingBenchmarks {
         floatPages[p] = generateFloatData(distribution, VALUES_PER_PAGE, rand);
         doublePages[p] = generateDoubleData(distribution, VALUES_PER_PAGE, rand);
       }
-      floatWriter =
-          new AlpValuesWriter.FloatAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
-      doubleWriter =
-          new AlpValuesWriter.DoubleAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      floatWriter = new AlpValuesWriter.FloatAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      doubleWriter = new AlpValuesWriter.DoubleAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
     }
 
     @TearDown(Level.Trial)
@@ -887,8 +899,8 @@ public class AlpEncodingBenchmarks {
         case ALTERNATING_BLOCKS: {
           int blockSize = 1024;
           for (int i = 0; i < NUM_VALUES; i += blockSize) {
-            DataDistribution dist = ((i / blockSize) % 2 == 0)
-                ? DataDistribution.MONETARY : DataDistribution.SENSOR;
+            DataDistribution dist =
+                ((i / blockSize) % 2 == 0) ? DataDistribution.MONETARY : DataDistribution.SENSOR;
             float[] block = generateFloatData(dist, blockSize, rand);
             double[] blockD = generateDoubleData(dist, blockSize, rand);
             System.arraycopy(block, 0, floatData, i, blockSize);
@@ -914,10 +926,10 @@ public class AlpEncodingBenchmarks {
         }
       }
 
-      floatWriter =
-          new AlpValuesWriter.FloatAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
-      doubleWriter =
-          new AlpValuesWriter.DoubleAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      floatWriter = new AlpValuesWriter.FloatAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      doubleWriter = new AlpValuesWriter.DoubleAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
     }
 
     @TearDown(Level.Trial)
@@ -988,8 +1000,11 @@ public class AlpEncodingBenchmarks {
         BytesInput bytes = writer.getBytes();
         long encodedSize = bytes.size();
         long rawSize = (long) NUM_VALUES * 4;
-        System.out.printf("  >>> [%s] Float: %d -> %d bytes (%.2fx compression, %.1f%% of raw)%n",
-            distribution, rawSize, encodedSize,
+        System.out.printf(
+            "  >>> [%s] Float: %d -> %d bytes (%.2fx compression, %.1f%% of raw)%n",
+            distribution,
+            rawSize,
+            encodedSize,
             (double) rawSize / encodedSize,
             100.0 * encodedSize / rawSize);
         bh.consume(bytes);
@@ -1008,8 +1023,11 @@ public class AlpEncodingBenchmarks {
         BytesInput bytes = writer.getBytes();
         long encodedSize = bytes.size();
         long rawSize = (long) NUM_VALUES * 8;
-        System.out.printf("  >>> [%s] Double: %d -> %d bytes (%.2fx compression, %.1f%% of raw)%n",
-            distribution, rawSize, encodedSize,
+        System.out.printf(
+            "  >>> [%s] Double: %d -> %d bytes (%.2fx compression, %.1f%% of raw)%n",
+            distribution,
+            rawSize,
+            encodedSize,
             (double) rawSize / encodedSize,
             100.0 * encodedSize / rawSize);
         bh.consume(bytes);
@@ -1050,10 +1068,10 @@ public class AlpEncodingBenchmarks {
       Random rand = new Random(42);
       floatData = generateFloatData(DataDistribution.MONETARY, numValues, rand);
       doubleData = generateDoubleData(DataDistribution.MONETARY, numValues, rand);
-      floatWriter =
-          new AlpValuesWriter.FloatAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
-      doubleWriter =
-          new AlpValuesWriter.DoubleAlpValuesWriter(INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      floatWriter = new AlpValuesWriter.FloatAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
+      doubleWriter = new AlpValuesWriter.DoubleAlpValuesWriter(
+          INITIAL_CAPACITY, PAGE_SIZE, new DirectByteBufferAllocator());
     }
 
     @TearDown(Level.Trial)

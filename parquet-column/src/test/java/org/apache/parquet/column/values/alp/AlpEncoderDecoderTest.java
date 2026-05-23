@@ -394,7 +394,8 @@ public class AlpEncoderDecoderTest {
     assertEquals("Monetary data should have 0 exceptions", 0, params.numExceptions);
     // Verify round-trip actually works for all values
     for (float v : values) {
-      assertFalse("Value " + v + " should not be exception with chosen params",
+      assertFalse(
+          "Value " + v + " should not be exception with chosen params",
           AlpEncoderDecoder.isFloatException(v, params.exponent, params.factor));
     }
   }
@@ -406,7 +407,8 @@ public class AlpEncoderDecoderTest {
 
     assertEquals("Monetary data should have 0 exceptions", 0, params.numExceptions);
     for (double v : values) {
-      assertFalse("Value " + v + " should not be exception with chosen params",
+      assertFalse(
+          "Value " + v + " should not be exception with chosen params",
           AlpEncoderDecoder.isDoubleException(v, params.exponent, params.factor));
     }
   }
@@ -428,8 +430,7 @@ public class AlpEncoderDecoderTest {
       }
     }
 
-    assertEquals("Reported exception count should match actual",
-        actualExceptions, params.numExceptions);
+    assertEquals("Reported exception count should match actual", actualExceptions, params.numExceptions);
   }
 
   @Test
@@ -444,8 +445,7 @@ public class AlpEncoderDecoderTest {
       }
     }
 
-    assertEquals("Reported exception count should match actual",
-        actualExceptions, params.numExceptions);
+    assertEquals("Reported exception count should match actual", actualExceptions, params.numExceptions);
   }
 
   /**
@@ -466,8 +466,8 @@ public class AlpEncoderDecoderTest {
       }
     }
 
-    assertEquals("Preset exception count should match actual for chosen params",
-        actualExceptions, params.numExceptions);
+    assertEquals(
+        "Preset exception count should match actual for chosen params", actualExceptions, params.numExceptions);
   }
 
   // ========== Encoding Limit Boundary Tests (Unit-Level) ==========
@@ -479,20 +479,18 @@ public class AlpEncoderDecoderTest {
     // Values between 2^23 and the limit may or may not round-trip.
 
     // Values within magic-trick precision range should NOT be exceptions
-    assertFalse("Small int should encode at e=0,f=0",
-        AlpEncoderDecoder.isFloatException(1000.0f, 0, 0));
-    assertFalse("8M should encode at e=0,f=0 (within 2^23)",
-        AlpEncoderDecoder.isFloatException(8000000.0f, 0, 0));
+    assertFalse("Small int should encode at e=0,f=0", AlpEncoderDecoder.isFloatException(1000.0f, 0, 0));
+    assertFalse("8M should encode at e=0,f=0 (within 2^23)", AlpEncoderDecoder.isFloatException(8000000.0f, 0, 0));
 
     // Value above FLOAT_ENCODING_UPPER_LIMIT is always exception (range check fails)
-    assertTrue("Value above FLOAT_ENCODING_UPPER_LIMIT should be exception at e=0,f=0",
+    assertTrue(
+        "Value above FLOAT_ENCODING_UPPER_LIMIT should be exception at e=0,f=0",
         AlpEncoderDecoder.isFloatException(2200000000.0f, 0, 0));
 
     // Negative limit
-    assertFalse("Negative small int should encode",
-        AlpEncoderDecoder.isFloatException(-1000.0f, 0, 0));
-    assertTrue("Large negative value should be exception",
-        AlpEncoderDecoder.isFloatException(-2200000000.0f, 0, 0));
+    assertFalse("Negative small int should encode", AlpEncoderDecoder.isFloatException(-1000.0f, 0, 0));
+    assertTrue(
+        "Large negative value should be exception", AlpEncoderDecoder.isFloatException(-2200000000.0f, 0, 0));
   }
 
   @Test
@@ -501,30 +499,25 @@ public class AlpEncoderDecoderTest {
     // Magic trick precision (MAGIC_DOUBLE = 2^51+2^52) works for |value| < ~2^52 ≈ 4.5e15.
 
     // Values within magic-trick precision range should NOT be exceptions
-    assertFalse("Small int should encode at e=0,f=0",
-        AlpEncoderDecoder.isDoubleException(1000.0, 0, 0));
-    assertFalse("4e15 should encode at e=0,f=0 (within 2^52)",
-        AlpEncoderDecoder.isDoubleException(4.0e15, 0, 0));
+    assertFalse("Small int should encode at e=0,f=0", AlpEncoderDecoder.isDoubleException(1000.0, 0, 0));
+    assertFalse("4e15 should encode at e=0,f=0 (within 2^52)", AlpEncoderDecoder.isDoubleException(4.0e15, 0, 0));
 
     // Value above ENCODING_UPPER_LIMIT is always exception
-    assertTrue("Value above ENCODING_UPPER_LIMIT should be exception at e=0,f=0",
+    assertTrue(
+        "Value above ENCODING_UPPER_LIMIT should be exception at e=0,f=0",
         AlpEncoderDecoder.isDoubleException(9.3e18, 0, 0));
 
     // Negative
-    assertFalse("Negative small value should encode",
-        AlpEncoderDecoder.isDoubleException(-1000.0, 0, 0));
-    assertTrue("Large negative value should be exception",
-        AlpEncoderDecoder.isDoubleException(-9.3e18, 0, 0));
+    assertFalse("Negative small value should encode", AlpEncoderDecoder.isDoubleException(-1000.0, 0, 0));
+    assertTrue("Large negative value should be exception", AlpEncoderDecoder.isDoubleException(-9.3e18, 0, 0));
   }
 
   @Test
   public void testScalingOverflowBecomesException() {
     // 100.0f * 1e10 = 1e12, well above FLOAT_ENCODING_UPPER_LIMIT
-    assertTrue("100.0 scaled by e=10 should overflow",
-        AlpEncoderDecoder.isFloatException(100.0f, 10, 0));
+    assertTrue("100.0 scaled by e=10 should overflow", AlpEncoderDecoder.isFloatException(100.0f, 10, 0));
 
     // 0.1f * 1e10 = 1e9, still within limit
-    assertFalse("0.1 scaled by e=10 should not overflow",
-        AlpEncoderDecoder.isFloatException(0.1f, 10, 0));
+    assertFalse("0.1 scaled by e=10 should not overflow", AlpEncoderDecoder.isFloatException(0.1f, 10, 0));
   }
 }
