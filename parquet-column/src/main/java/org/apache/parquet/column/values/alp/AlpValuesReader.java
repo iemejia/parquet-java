@@ -88,11 +88,19 @@ abstract class AlpValuesReader extends ValuesReader {
     this.vectorMask = this.vectorSize - 1;
     this.logVectorSize = logVectorSize;
     this.totalCount = numElements;
-    this.numVectors = (numElements + vectorSize - 1) / vectorSize;
+    // Use long arithmetic to avoid overflow in ceiling division
+    this.numVectors = (int) (((long) numElements + vectorSize - 1) / vectorSize);
     this.currentIndex = 0;
     this.currentVectorIndex = -1;
 
-    this.offsetArraySize = numVectors * Integer.BYTES;
+    long offsetArraySizeLong = (long) numVectors * Integer.BYTES;
+    long streamAvailable = stream.available();
+    if (offsetArraySizeLong > streamAvailable || offsetArraySizeLong > Integer.MAX_VALUE) {
+      throw new ParquetDecodingException(
+          "ALP offset array size (" + offsetArraySizeLong + " bytes) exceeds available stream data ("
+              + streamAvailable + " bytes). numElements=" + numElements + ", vectorSize=" + vectorSize);
+    }
+    this.offsetArraySize = (int) offsetArraySizeLong;
     ByteBuffer offsetBuf = stream.slice(offsetArraySize).order(ByteOrder.LITTLE_ENDIAN);
     this.vectorOffsets = new int[numVectors];
     for (int v = 0; v < numVectors; v++) {
@@ -120,7 +128,13 @@ abstract class AlpValuesReader extends ValuesReader {
   // Offsets in the page are relative to the compression body (after header),
   // but vectorsData starts after the offset array, so adjust.
   protected int getVectorDataPosition(int vectorIdx) {
-    return vectorOffsets[vectorIdx] - offsetArraySize;
+    int pos = vectorOffsets[vectorIdx] - offsetArraySize;
+    if (pos < 0 || pos >= vectorsData.limit()) {
+      throw new ParquetDecodingException(
+          "ALP vector offset out of bounds: vectorIdx=" + vectorIdx + ", computed position=" + pos
+              + ", buffer limit=" + vectorsData.limit());
+    }
+    return pos;
   }
 
   @Override
