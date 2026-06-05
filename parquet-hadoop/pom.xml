@@ -43,6 +43,11 @@
     </dependency>
     <dependency>
       <groupId>org.apache.parquet</groupId>
+      <artifactId>parquet-compression</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.parquet</groupId>
       <artifactId>parquet-format-structures</artifactId>
       <version>${project.version}</version>
     </dependency>
@@ -131,7 +136,7 @@
     <dependency>
       <groupId>org.xerial.snappy</groupId>
       <artifactId>snappy-java</artifactId>
-      <version>1.1.10.8</version>
+      <version>${snappy-java.version}</version>
       <type>jar</type>
       <scope>compile</scope>
     </dependency>
@@ -144,7 +149,7 @@
     <dependency>
       <groupId>io.airlift</groupId>
       <artifactId>aircompressor</artifactId>
-      <version>2.0.3</version>
+      <version>${aircompressor.version}</version>
     </dependency>
     <dependency>
       <groupId>it.unimi.dsi</groupId>
