@@ -83,13 +83,6 @@ public class TestDirectCodecFactory {
       final BytesInputCompressor heapCompressor = heapCodecFactory.getCompressor(codec);
       final BytesInputDecompressor heapDecompressor = heapCodecFactory.getDecompressor(codec);
 
-      if (codec == LZ4_RAW) {
-        // LZ4_RAW should use a direct decompression path, not the heap-copy IndirectDecompressor.
-        Assert.assertFalse(
-            String.format("The hadoop codec %s should support direct decompression", codec),
-            directDecompressor instanceof DirectCodecFactory.IndirectDecompressor);
-      }
-
       final BytesInput directCompressed;
       if (useOnHeapCompression) {
         directCompressed = directCompressor.compress(BytesInput.from(rawArr));

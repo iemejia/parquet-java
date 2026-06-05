@@ -30,20 +30,12 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Objects;
 import java.util.zip.Deflater;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.io.compress.CodecPool;
-import org.apache.hadoop.io.compress.CompressionCodec;
-import org.apache.hadoop.io.compress.CompressionOutputStream;
-import org.apache.hadoop.io.compress.Compressor;
-import org.apache.hadoop.io.compress.Decompressor;
-import org.apache.hadoop.util.ReflectionUtils;
 import org.apache.parquet.Preconditions;
 import org.apache.parquet.bytes.ByteBufferAllocator;
 import org.apache.parquet.bytes.ByteBufferInputStream;
@@ -53,7 +45,6 @@ import org.apache.parquet.conf.HadoopParquetConfiguration;
 import org.apache.parquet.conf.ParquetConfiguration;
 import org.apache.parquet.hadoop.codec.ZstandardCodec;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
-import org.apache.parquet.hadoop.util.ConfigurationUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xerial.snappy.Snappy;
@@ -61,9 +52,6 @@ import org.xerial.snappy.Snappy;
 public class CodecFactory implements CompressionCodecFactory {
 
   private static final Logger LOG = LoggerFactory.getLogger(CodecFactory.class);
-
-  protected static final Map<String, CompressionCodec> CODEC_BY_NAME =
-      Collections.synchronizedMap(new HashMap<String, CompressionCodec>());
 
   private final Map<CompressionCodecName, BytesCompressor> compressors = new HashMap<>();
   private final Map<CompressionCodecName, BytesDecompressor> decompressors = new HashMap<>();
@@ -254,92 +242,6 @@ public class CodecFactory implements CompressionCodecFactory {
     return new DirectCodecFactory(config, allocator, pageSize);
   }
 
-  class HeapBytesDecompressor extends BytesDecompressor {
-
-    private final CompressionCodec codec;
-    private final Decompressor decompressor;
-
-    HeapBytesDecompressor(CompressionCodec codec) {
-      this.codec = Objects.requireNonNull(codec);
-      decompressor = CodecPool.getDecompressor(codec);
-    }
-
-    @Override
-    public BytesInput decompress(BytesInput bytes, int decompressedSize) throws IOException {
-      final BytesInput decompressed;
-      if (decompressor != null) {
-        decompressor.reset();
-      }
-      InputStream is = codec.createInputStream(bytes.toInputStream(), decompressor);
-      decompressed = BytesInput.from(is, decompressedSize);
-      return decompressed;
-    }
-
-    @Override
-    public void decompress(ByteBuffer input, int compressedSize, ByteBuffer output, int decompressedSize)
-        throws IOException {
-      Preconditions.checkArgument(
-          input.remaining() >= compressedSize, "Not enough bytes available in the input buffer");
-      int origLimit = input.limit();
-      int origPosition = input.position();
-      input.limit(origPosition + compressedSize);
-      ByteBuffer decompressed =
-          decompress(BytesInput.from(input), decompressedSize).toByteBuffer();
-      output.put(decompressed);
-      input.limit(origLimit);
-      input.position(origPosition + compressedSize);
-    }
-
-    public void release() {
-      if (decompressor != null) {
-        CodecPool.returnDecompressor(decompressor);
-      }
-    }
-  }
-
-  /**
-   * Encapsulates the logic around hadoop compression
-   */
-  class HeapBytesCompressor extends BytesCompressor {
-
-    private final CompressionCodec codec;
-    private final Compressor compressor;
-    private final ByteArrayOutputStream compressedOutBuffer;
-    private final CompressionCodecName codecName;
-
-    HeapBytesCompressor(CompressionCodecName codecName, CompressionCodec codec) {
-      this.codecName = codecName;
-      this.codec = Objects.requireNonNull(codec);
-      this.compressor = CodecPool.getCompressor(codec);
-      this.compressedOutBuffer = new ByteArrayOutputStream(pageSize);
-    }
-
-    @Override
-    public BytesInput compress(BytesInput bytes) throws IOException {
-      compressedOutBuffer.reset();
-      if (compressor != null) {
-        // null compressor for non-native gzip
-        compressor.reset();
-      }
-      try (CompressionOutputStream cos = codec.createOutputStream(compressedOutBuffer, compressor)) {
-        bytes.writeAllTo(cos);
-        cos.finish();
-      }
-      return BytesInput.from(compressedOutBuffer);
-    }
-
-    @Override
-    public void release() {
-      if (compressor != null) {
-        CodecPool.returnCompressor(compressor);
-      }
-    }
-
-    public CompressionCodecName getCodecName() {
-      return codecName;
-    }
-  }
-
   @Override
   public BytesCompressor getCompressor(CompressionCodecName codecName) {
     BytesCompressor comp = compressors.get(codecName);
@@ -386,10 +288,10 @@ public class CodecFactory implements CompressionCodecFactory {
           int brotliQuality = conf.getInt("compression.brotli.quality", 1);
           return new BrotliBytesCompressor(brotliQuality);
         }
-        // fall through to Hadoop codec path
+        throw new UnsupportedOperationException(
+            "BROTLI codec requires brotli4j on the classpath (com.aayushatharva.brotli4j)");
       default:
-        CompressionCodec codec = getCodec(codecName);
-        return codec == null ? NO_OP_COMPRESSOR : new HeapBytesCompressor(codecName, codec);
+        throw new UnsupportedOperationException("Codec not supported: " + codecName);
     }
   }
 
@@ -411,56 +313,11 @@ public class CodecFactory implements CompressionCodecFactory {
         if (Brotli4j.AVAILABLE) {
           return new BrotliBytesDecompressor();
         }
-        // fall through to Hadoop codec path
+        throw new UnsupportedOperationException(
+            "BROTLI codec requires brotli4j on the classpath (com.aayushatharva.brotli4j)");
       default:
-        CompressionCodec codec = getCodec(codecName);
-        return codec == null ? NO_OP_DECOMPRESSOR : new HeapBytesDecompressor(codec);
+        throw new UnsupportedOperationException("Codec not supported: " + codecName);
     }
-  }
-
-  /**
-   * @param codecName the requested codec
-   * @return the corresponding hadoop codec. null if UNCOMPRESSED
-   */
-  protected CompressionCodec getCodec(CompressionCodecName codecName) {
-    String codecClassName = codecName.getHadoopCompressionCodecClassName();
-    if (codecClassName == null) {
-      return null;
-    }
-    String codecCacheKey = this.cacheKey(codecName);
-    CompressionCodec codec = CODEC_BY_NAME.get(codecCacheKey);
-    if (codec != null) {
-      return codec;
-    }
-
-    try {
-      Class<?> codecClass;
-      try {
-        codecClass = Class.forName(codecClassName);
-      } catch (ClassNotFoundException e) {
-        // Try to load the class using the job classloader
-        codecClass = new Configuration(false).getClassLoader().loadClass(codecClassName);
-      }
-      codec = (CompressionCodec)
-          ReflectionUtils.newInstance(codecClass, ConfigurationUtil.createHadoopConfiguration(conf));
-      CODEC_BY_NAME.put(codecCacheKey, codec);
-      return codec;
-    } catch (ClassNotFoundException e) {
-      throw new BadConfigurationException("Class " + codecClassName + " was not found", e);
-    }
-  }
-
-  private String cacheKey(CompressionCodecName codecName) {
-    String level = null;
-    switch (codecName) {
-      case BROTLI:
-        level = conf.get("compression.brotli.quality");
-        break;
-      default:
-        // compression level is not supported; ignore it
-    }
-    String codecClass = codecName.getHadoopCompressionCodecClassName();
-    return level == null ? codecClass : codecClass + ":" + level;
   }
 
   @Override
