@@ -111,9 +111,7 @@ public class CompressionBenchmark {
 
   @Benchmark
   public byte[] decompress() throws IOException {
-    // Force materialization of the decompressed data. Without this, codecs using
-    // the stream-based HeapBytesDecompressor (e.g. GZIP) would return a lazy
-    // StreamBytesInput, deferring the actual work. toByteArray() is essentially
+    // Force materialization of the decompressed data. toByteArray() is essentially
     // free for our optimized implementations (returns the existing byte[]).
     return decompressor
         .decompress(BytesInput.from(compressedData), decompressedSize)

@@ -22,20 +22,12 @@ import static org.apache.parquet.schema.MessageTypeParser.parseMessageType;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 
-import io.airlift.compress.lzo.LzoCodec;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.lang.reflect.Constructor;
-import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.io.compress.CompressionCodec;
-import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.compression.CompressionCodecFactory;
 import org.apache.parquet.example.data.Group;
 import org.apache.parquet.example.data.simple.SimpleGroupFactory;
@@ -56,27 +48,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * End-to-end interoperability tests between the new direct compression path
- * (bypassing Hadoop codec abstraction) and the old Hadoop CompressionCodec path.
+ * End-to-end round-trip tests for all supported compression codecs.
  *
- * <p>These tests verify that:
- * <ul>
- *   <li>Files written with the Hadoop codec path can be read correctly with the new direct path</li>
- *   <li>Files written with the new direct path can be read correctly with the Hadoop codec path</li>
- * </ul>
- *
- * <p>This ensures backward/forward compatibility of compressed Parquet files regardless
- * of which compression implementation produced them.
- *
- * <p>For LZO and BROTLI, the original Hadoop codec classes are not on the test classpath:
- * <ul>
- *   <li>LZO: Aircompressor's {@link io.airlift.compress.lzo.LzoCodec} (which implements
- *       {@link CompressionCodec} with Hadoop-compatible framing) is used as the Hadoop-path
- *       substitute, validating interop with the direct {@code LzoBytesCompressor}.</li>
- *   <li>BROTLI: A stream-based compressor/decompressor using brotli4j's
- *       {@code BrotliOutputStream}/{@code BrotliInputStream} is used to validate interop
- *       with the direct single-call {@code BrotliBytesCompressor}.</li>
- * </ul>
+ * <p>These tests verify that data written with each codec can be read back
+ * correctly, including multi-row-group scenarios.
  */
 public class TestCompressionInterop {
 
@@ -98,11 +73,9 @@ public class TestCompressionInterop {
       + "} ");
 
   /**
-   * All codecs that have a direct bypass implementation in CodecFactory.
-   * LZO uses aircompressor's LzoCodec (Hadoop-compatible) as the Hadoop-path substitute.
-   * BROTLI uses brotli4j's streaming API as the Hadoop-path substitute.
+   * All codecs that have a direct implementation in CodecFactory.
    */
-  private static final CompressionCodecName[] INTEROP_CODECS = {
+  private static final CompressionCodecName[] ALL_CODECS = {
     CompressionCodecName.SNAPPY,
     CompressionCodecName.GZIP,
     CompressionCodecName.ZSTD,
@@ -114,311 +87,94 @@ public class TestCompressionInterop {
   @Rule
   public TemporaryFolder tempFolder = new TemporaryFolder();
 
-  // ---- Hadoop-path simulation factories ----
+  // ---- Round-trip tests for each codec ----
 
-  /**
-   * A CodecFactory that always uses the Hadoop CompressionCodec streaming path,
-   * bypassing the optimized direct implementations. This simulates the behavior
-   * before the GH-3530 optimization.
-   *
-   * <p>For LZO: uses aircompressor's {@link LzoCodec} which implements Hadoop's
-   * {@link CompressionCodec} interface with Hadoop-compatible framing.
-   *
-   * <p>For BROTLI: uses a stream-based compressor/decompressor backed by brotli4j's
-   * {@code BrotliOutputStream}/{@code BrotliInputStream} (via reflection since brotli4j
-   * is a runtime-only dependency).
-   */
-  static class HadoopOnlyCodecFactory extends CodecFactory {
-    HadoopOnlyCodecFactory(Configuration conf, int pageSize) {
-      super(conf, pageSize);
-    }
+  @Test
+  public void roundTrip_SNAPPY() throws Exception {
+    testRoundTrip(CompressionCodecName.SNAPPY);
+  }
 
-    @Override
-    protected BytesCompressor createCompressor(CompressionCodecName codecName) {
-      switch (codecName) {
-        case UNCOMPRESSED:
-          return NO_OP_COMPRESSOR;
-        case LZO:
-          // Use aircompressor's LzoCodec which implements Hadoop's CompressionCodec
-          return new HeapBytesCompressor(codecName, new LzoCodec());
-        case BROTLI:
-          if (CodecFactory.Brotli4j.AVAILABLE) {
-            return new BrotliStreamCompressor();
-          }
-          // fall through if brotli4j not available
-        default:
-          CompressionCodec codec = getCodec(codecName);
-          if (codec == null) {
-            return NO_OP_COMPRESSOR;
-          }
-          return new HeapBytesCompressor(codecName, codec);
-      }
-    }
+  @Test
+  public void roundTrip_GZIP() throws Exception {
+    testRoundTrip(CompressionCodecName.GZIP);
+  }
 
-    @Override
-    protected BytesDecompressor createDecompressor(CompressionCodecName codecName) {
-      switch (codecName) {
-        case UNCOMPRESSED:
-          return NO_OP_DECOMPRESSOR;
-        case LZO:
-          // Use aircompressor's LzoCodec which implements Hadoop's CompressionCodec
-          return new HeapBytesDecompressor(new LzoCodec());
-        case BROTLI:
-          if (CodecFactory.Brotli4j.AVAILABLE) {
-            return new BrotliStreamDecompressor();
-          }
-          // fall through if brotli4j not available
-        default:
-          CompressionCodec codec = getCodec(codecName);
-          if (codec == null) {
-            return NO_OP_DECOMPRESSOR;
-          }
-          return new HeapBytesDecompressor(codec);
-      }
+  @Test
+  public void roundTrip_ZSTD() throws Exception {
+    testRoundTrip(CompressionCodecName.ZSTD);
+  }
+
+  @Test
+  public void roundTrip_LZ4_RAW() throws Exception {
+    testRoundTrip(CompressionCodecName.LZ4_RAW);
+  }
+
+  @Test
+  public void roundTrip_LZO() throws Exception {
+    testRoundTrip(CompressionCodecName.LZO);
+  }
+
+  @Test
+  public void roundTrip_BROTLI() throws Exception {
+    testRoundTrip(CompressionCodecName.BROTLI);
+  }
+
+  // ---- All codecs in one test ----
+
+  @Test
+  public void roundTripAllCodecs() throws Exception {
+    for (CompressionCodecName codec : ALL_CODECS) {
+      LOG.info("Testing round-trip for codec: {}", codec);
+      testRoundTrip(codec);
     }
   }
 
-  /**
-   * Stream-based Brotli compressor using brotli4j's BrotliOutputStream via reflection.
-   * This mimics what a Hadoop BrotliCodec would do: wrap the output in a BrotliOutputStream.
-   */
-  static class BrotliStreamCompressor extends CodecFactory.BytesCompressor {
-    private static final Constructor<?> BROTLI_OS_CTOR;
-
-    static {
-      Constructor<?> ctor = null;
-      try {
-        Class<?> bosClass = Class.forName("com.aayushatharva.brotli4j.encoder.BrotliOutputStream");
-        ctor = bosClass.getConstructor(OutputStream.class);
-      } catch (Throwable t) {
-        // will be null — checked before use
-      }
-      BROTLI_OS_CTOR = ctor;
-    }
-
-    @Override
-    public BytesInput compress(BytesInput bytes) throws IOException {
-      try {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream((int) bytes.size());
-        OutputStream bos = (OutputStream) BROTLI_OS_CTOR.newInstance(baos);
-        bytes.writeAllTo(bos);
-        bos.close();
-        return BytesInput.from(baos.toByteArray());
-      } catch (ReflectiveOperationException e) {
-        throw new IOException("Brotli stream compression failed", e);
-      }
-    }
-
-    @Override
-    public CompressionCodecName getCodecName() {
-      return CompressionCodecName.BROTLI;
-    }
-
-    @Override
-    public void release() {}
-  }
-
-  /**
-   * Stream-based Brotli decompressor using brotli4j's BrotliInputStream via reflection.
-   * This mimics what a Hadoop BrotliCodec would do: wrap the input in a BrotliInputStream.
-   */
-  static class BrotliStreamDecompressor extends CodecFactory.BytesDecompressor {
-    private static final Constructor<?> BROTLI_IS_CTOR;
-
-    static {
-      Constructor<?> ctor = null;
-      try {
-        Class<?> bisClass = Class.forName("com.aayushatharva.brotli4j.decoder.BrotliInputStream");
-        ctor = bisClass.getConstructor(InputStream.class);
-      } catch (Throwable t) {
-        // will be null — checked before use
-      }
-      BROTLI_IS_CTOR = ctor;
-    }
-
-    @Override
-    public BytesInput decompress(BytesInput bytes, int decompressedSize) throws IOException {
-      try {
-        InputStream bis = (InputStream) BROTLI_IS_CTOR.newInstance(bytes.toInputStream());
-        byte[] output = new byte[decompressedSize];
-        int offset = 0;
-        while (offset < decompressedSize) {
-          int read = bis.read(output, offset, decompressedSize - offset);
-          if (read < 0) {
-            throw new IOException(
-                "Unexpected end of Brotli stream at offset " + offset + " of " + decompressedSize);
-          }
-          offset += read;
-        }
-        bis.close();
-        return BytesInput.from(output);
-      } catch (ReflectiveOperationException e) {
-        throw new IOException("Brotli stream decompression failed", e);
-      }
-    }
-
-    @Override
-    public void decompress(ByteBuffer input, int compressedSize, ByteBuffer output, int decompressedSize)
-        throws IOException {
-      byte[] compressed = new byte[compressedSize];
-      input.get(compressed);
-      BytesInput decompressed = decompress(BytesInput.from(compressed), decompressedSize);
-      output.put(decompressed.toByteArray());
-    }
-
-    @Override
-    public void release() {}
-  }
-
-  // ---- Write with Hadoop path, read with Direct path ----
+  // ---- Multi-row-group test to validate compression across row group boundaries ----
 
   @Test
-  public void writeHadoopReadDirect_SNAPPY() throws Exception {
-    testWriteHadoopReadDirect(CompressionCodecName.SNAPPY);
-  }
-
-  @Test
-  public void writeHadoopReadDirect_GZIP() throws Exception {
-    testWriteHadoopReadDirect(CompressionCodecName.GZIP);
-  }
-
-  @Test
-  public void writeHadoopReadDirect_ZSTD() throws Exception {
-    testWriteHadoopReadDirect(CompressionCodecName.ZSTD);
-  }
-
-  @Test
-  public void writeHadoopReadDirect_LZ4_RAW() throws Exception {
-    testWriteHadoopReadDirect(CompressionCodecName.LZ4_RAW);
-  }
-
-  @Test
-  public void writeHadoopReadDirect_LZO() throws Exception {
-    testWriteHadoopReadDirect(CompressionCodecName.LZO);
-  }
-
-  @Test
-  public void writeHadoopReadDirect_BROTLI() throws Exception {
-    testWriteHadoopReadDirect(CompressionCodecName.BROTLI);
-  }
-
-  // ---- Write with Direct path, read with Hadoop path ----
-
-  @Test
-  public void writeDirectReadHadoop_SNAPPY() throws Exception {
-    testWriteDirectReadHadoop(CompressionCodecName.SNAPPY);
-  }
-
-  @Test
-  public void writeDirectReadHadoop_GZIP() throws Exception {
-    testWriteDirectReadHadoop(CompressionCodecName.GZIP);
-  }
-
-  @Test
-  public void writeDirectReadHadoop_ZSTD() throws Exception {
-    testWriteDirectReadHadoop(CompressionCodecName.ZSTD);
-  }
-
-  @Test
-  public void writeDirectReadHadoop_LZ4_RAW() throws Exception {
-    testWriteDirectReadHadoop(CompressionCodecName.LZ4_RAW);
-  }
-
-  @Test
-  public void writeDirectReadHadoop_LZO() throws Exception {
-    testWriteDirectReadHadoop(CompressionCodecName.LZO);
-  }
-
-  @Test
-  public void writeDirectReadHadoop_BROTLI() throws Exception {
-    testWriteDirectReadHadoop(CompressionCodecName.BROTLI);
-  }
-
-  // ---- Bidirectional test: both directions for all codecs ----
-
-  @Test
-  public void bidirectionalInteropAllCodecs() throws Exception {
-    for (CompressionCodecName codec : INTEROP_CODECS) {
-      LOG.info("Testing bidirectional interop for codec: {}", codec);
-      testWriteHadoopReadDirect(codec);
-      testWriteDirectReadHadoop(codec);
-    }
-  }
-
-  // ---- Multi-row-group test to validate interop across row group boundaries ----
-
-  @Test
-  public void writeHadoopReadDirect_multiRowGroup() throws Exception {
-    for (CompressionCodecName codec : INTEROP_CODECS) {
-      testInteropMultiRowGroup(codec, /* writeWithHadoop= */ true);
-    }
-  }
-
-  @Test
-  public void writeDirectReadHadoop_multiRowGroup() throws Exception {
-    for (CompressionCodecName codec : INTEROP_CODECS) {
-      testInteropMultiRowGroup(codec, /* writeWithHadoop= */ false);
+  public void roundTrip_multiRowGroup() throws Exception {
+    for (CompressionCodecName codec : ALL_CODECS) {
+      LOG.info("Testing multi-row-group round-trip for codec: {}", codec);
+      testRoundTripMultiRowGroup(codec);
     }
   }
 
   // ---- Implementation ----
 
-  private void testWriteHadoopReadDirect(CompressionCodecName codec) throws Exception {
+  private void testRoundTrip(CompressionCodecName codec) throws Exception {
     Configuration conf = new Configuration();
-    Path file = tempFolder.newFolder().toPath().resolve("hadoop_write_" + codec.name() + ".parquet");
+    Path file = tempFolder.newFolder().toPath().resolve("roundtrip_" + codec.name() + ".parquet");
 
-    // Write using Hadoop codec path
-    CompressionCodecFactory hadoopFactory = new HadoopOnlyCodecFactory(conf, PAGE_SIZE);
-    List<Group> expectedRecords = writeFile(file, codec, hadoopFactory);
-    hadoopFactory.release();
+    // Write
+    CodecFactory factory = new CodecFactory(conf, PAGE_SIZE);
+    List<Group> expectedRecords = writeFile(file, codec, factory);
+    factory.release();
 
-    // Read using direct (default) codec path
-    CodecFactory directFactory = new CodecFactory(conf, PAGE_SIZE);
-    List<Group> actualRecords = readFile(file, directFactory);
-    directFactory.release();
+    // Read
+    CodecFactory readFactory = new CodecFactory(conf, PAGE_SIZE);
+    List<Group> actualRecords = readFile(file, readFactory);
+    readFactory.release();
 
     // Verify
-    assertRecordsEqual(expectedRecords, actualRecords, codec.name() + " hadoop->direct");
+    assertRecordsEqual(expectedRecords, actualRecords, codec.name() + " round-trip");
   }
 
-  private void testWriteDirectReadHadoop(CompressionCodecName codec) throws Exception {
+  private void testRoundTripMultiRowGroup(CompressionCodecName codec) throws Exception {
     Configuration conf = new Configuration();
-    Path file = tempFolder.newFolder().toPath().resolve("direct_write_" + codec.name() + ".parquet");
-
-    // Write using direct (default) codec path
-    CodecFactory directFactory = new CodecFactory(conf, PAGE_SIZE);
-    List<Group> expectedRecords = writeFile(file, codec, directFactory);
-    directFactory.release();
-
-    // Read using Hadoop codec path
-    CompressionCodecFactory hadoopFactory = new HadoopOnlyCodecFactory(conf, PAGE_SIZE);
-    List<Group> actualRecords = readFile(file, hadoopFactory);
-    hadoopFactory.release();
-
-    // Verify
-    assertRecordsEqual(expectedRecords, actualRecords, codec.name() + " direct->hadoop");
-  }
-
-  private void testInteropMultiRowGroup(CompressionCodecName codec, boolean writeWithHadoop) throws Exception {
-    Configuration conf = new Configuration();
-    String prefix = writeWithHadoop ? "hadoop_mrg_" : "direct_mrg_";
-    Path file = tempFolder.newFolder().toPath().resolve(prefix + codec.name() + ".parquet");
+    Path file = tempFolder.newFolder().toPath().resolve("roundtrip_mrg_" + codec.name() + ".parquet");
 
     // Use a small row group size to force multiple row groups
     int smallRowGroupSize = 4 * 1024;
 
-    CompressionCodecFactory writeFactory =
-        writeWithHadoop ? new HadoopOnlyCodecFactory(conf, PAGE_SIZE) : new CodecFactory(conf, PAGE_SIZE);
-    CompressionCodecFactory readFactory =
-        writeWithHadoop ? new CodecFactory(conf, PAGE_SIZE) : new HadoopOnlyCodecFactory(conf, PAGE_SIZE);
-
+    CodecFactory writeFactory = new CodecFactory(conf, PAGE_SIZE);
     List<Group> expectedRecords = writeFile(file, codec, writeFactory, smallRowGroupSize, 1000);
     writeFactory.release();
 
+    CodecFactory readFactory = new CodecFactory(conf, PAGE_SIZE);
     List<Group> actualRecords = readFile(file, readFactory);
     readFactory.release();
 
-    assertRecordsEqual(expectedRecords, actualRecords, codec.name() + " multi-row-group " + prefix);
+    assertRecordsEqual(expectedRecords, actualRecords, codec.name() + " multi-row-group round-trip");
   }
 
   private List<Group> writeFile(Path file, CompressionCodecName codec, CompressionCodecFactory factory)
