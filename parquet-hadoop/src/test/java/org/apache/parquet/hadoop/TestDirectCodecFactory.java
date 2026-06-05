@@ -39,7 +39,6 @@ import org.apache.parquet.bytes.HeapByteBufferAllocator;
 import org.apache.parquet.bytes.TrackingByteBufferAllocator;
 import org.apache.parquet.compression.CompressionCodecFactory.BytesInputCompressor;
 import org.apache.parquet.compression.CompressionCodecFactory.BytesInputDecompressor;
-import org.apache.parquet.hadoop.codec.ZstandardCodec;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.junit.Assert;
 import org.junit.Test;
@@ -373,20 +372,12 @@ public class TestDirectCodecFactory {
     factory.release();
   }
 
-  // ---- Tests for ZSTD bufferPool config propagation through new direct compressor ----
+  // ---- Tests for ZSTD round-trip through direct compressor ----
 
   @Test
-  public void zstdBufferPoolEnabledRoundTrip() throws IOException {
+  public void zstdRoundTrip() throws IOException {
     Configuration conf = new Configuration();
-    conf.setBoolean(ZstandardCodec.PARQUET_COMPRESS_ZSTD_BUFFERPOOL_ENABLED, true);
-    verifyZstdRoundTrip(conf, "bufferPool=true");
-  }
-
-  @Test
-  public void zstdBufferPoolDisabledRoundTrip() throws IOException {
-    Configuration conf = new Configuration();
-    conf.setBoolean(ZstandardCodec.PARQUET_COMPRESS_ZSTD_BUFFERPOOL_ENABLED, false);
-    verifyZstdRoundTrip(conf, "bufferPool=false");
+    verifyZstdRoundTrip(conf, "default");
   }
 
   /**
@@ -415,7 +406,7 @@ public class TestDirectCodecFactory {
   @Test
   public void zstdWorkersConfigRoundTrip() throws IOException {
     Configuration conf = new Configuration();
-    conf.setInt(ZstandardCodec.PARQUET_COMPRESS_ZSTD_WORKERS, 2);
+    conf.setInt(CodecFactory.PARQUET_COMPRESS_ZSTD_WORKERS, 2);
     CodecFactory factory = new CodecFactory(conf, pageSize);
     BytesInputCompressor compressor = factory.getCompressor(ZSTD);
     BytesInputDecompressor decompressor = factory.getDecompressor(ZSTD);
@@ -437,10 +428,10 @@ public class TestDirectCodecFactory {
   @Test
   public void zstdLevelConfigThroughDirectPath() throws IOException {
     Configuration confLow = new Configuration();
-    confLow.setInt(ZstandardCodec.PARQUET_COMPRESS_ZSTD_LEVEL, 1);
+    confLow.setInt(CodecFactory.PARQUET_COMPRESS_ZSTD_LEVEL, 1);
 
     Configuration confHigh = new Configuration();
-    confHigh.setInt(ZstandardCodec.PARQUET_COMPRESS_ZSTD_LEVEL, 19);
+    confHigh.setInt(CodecFactory.PARQUET_COMPRESS_ZSTD_LEVEL, 19);
 
     byte[] data = new byte[64 * 1024];
     new Random(42).nextBytes(data);

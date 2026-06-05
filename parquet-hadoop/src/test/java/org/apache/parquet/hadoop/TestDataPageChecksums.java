@@ -56,7 +56,6 @@ import org.apache.parquet.compression.CompressionCodecFactory.BytesInputCompress
 import org.apache.parquet.example.data.Group;
 import org.apache.parquet.example.data.GroupFactory;
 import org.apache.parquet.example.data.simple.SimpleGroupFactory;
-import org.apache.parquet.hadoop.codec.SnappyCompressor;
 import org.apache.parquet.hadoop.example.ExampleParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
@@ -659,12 +658,9 @@ public class TestDataPageChecksums {
    */
   private byte[] snappy(byte[] bytes, int offset) throws IOException {
     int length = bytes.length - offset;
-    SnappyCompressor compressor = new SnappyCompressor();
-    compressor.reset();
-    compressor.setInput(bytes, offset, length);
-    compressor.finish();
-    byte[] buffer = new byte[length * 2];
-    int compressedSize = compressor.compress(buffer, 0, buffer.length);
+    byte[] input = Arrays.copyOfRange(bytes, offset, bytes.length);
+    byte[] buffer = new byte[org.xerial.snappy.Snappy.maxCompressedLength(length)];
+    int compressedSize = org.xerial.snappy.Snappy.compress(input, 0, length, buffer, 0);
     return BytesInput.concat(
             BytesInput.from(Arrays.copyOfRange(bytes, 0, offset)),
             BytesInput.from(Arrays.copyOfRange(buffer, 0, compressedSize)))
