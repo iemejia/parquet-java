@@ -39,6 +39,7 @@ import org.apache.parquet.bytes.HeapByteBufferAllocator;
 import org.apache.parquet.bytes.TrackingByteBufferAllocator;
 import org.apache.parquet.compression.CompressionCodecFactory.BytesInputCompressor;
 import org.apache.parquet.compression.CompressionCodecFactory.BytesInputDecompressor;
+import org.apache.parquet.compression.DefaultCompressionCodecFactory;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.junit.Assert;
 import org.junit.Test;
@@ -60,7 +61,7 @@ public class TestDirectCodecFactory {
   private void test(int size, CompressionCodecName codec, boolean useOnHeapCompression, Decompression decomp) {
     try (TrackingByteBufferAllocator allocator = TrackingByteBufferAllocator.wrap(new DirectByteBufferAllocator());
         ByteBufferReleaser releaser = new ByteBufferReleaser(allocator)) {
-      final CodecFactory directCodecFactory =
+      final DefaultCompressionCodecFactory directCodecFactory =
           CodecFactory.createDirectCodecFactory(new Configuration(), allocator, pageSize);
       final CodecFactory heapCodecFactory = new CodecFactory(new Configuration(), pageSize);
       ByteBuffer rawBuf = allocator.allocate(size);
@@ -500,7 +501,7 @@ public class TestDirectCodecFactory {
   public void brotliDirectFactoryRoundTrip() throws IOException {
     // Test through the DirectCodecFactory path where BROTLI bypass lives
     try (TrackingByteBufferAllocator alloc = TrackingByteBufferAllocator.wrap(new DirectByteBufferAllocator())) {
-      CodecFactory directFactory = CodecFactory.createDirectCodecFactory(new Configuration(), alloc, pageSize);
+      DefaultCompressionCodecFactory directFactory = CodecFactory.createDirectCodecFactory(new Configuration(), alloc, pageSize);
       BytesInputCompressor compressor = directFactory.getCompressor(BROTLI);
       BytesInputDecompressor decompressor = directFactory.getDecompressor(BROTLI);
 
@@ -543,7 +544,7 @@ public class TestDirectCodecFactory {
 
     CodecFactory heapFactory = new CodecFactory(new Configuration(), pageSize);
     try (TrackingByteBufferAllocator alloc = TrackingByteBufferAllocator.wrap(new DirectByteBufferAllocator())) {
-      CodecFactory directFactory = CodecFactory.createDirectCodecFactory(new Configuration(), alloc, pageSize);
+      DefaultCompressionCodecFactory directFactory = CodecFactory.createDirectCodecFactory(new Configuration(), alloc, pageSize);
 
       for (CompressionCodecName codec : codecs) {
         // heap compress -> direct decompress

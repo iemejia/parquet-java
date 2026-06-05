@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.parquet.hadoop;
+package org.apache.parquet.compression;
 
 import com.aayushatharva.brotli4j.Brotli4jLoader;
 import com.aayushatharva.brotli4j.decoder.Decoder;
@@ -25,13 +25,12 @@ import com.github.luben.zstd.ZstdCompressCtx;
 import com.github.luben.zstd.ZstdDecompressCtx;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.Preconditions;
 import org.apache.parquet.bytes.ByteBufferAllocator;
-import org.apache.parquet.compression.DefaultCompressionCodecFactory;
 import org.apache.parquet.bytes.ByteBufferReleaser;
 import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.bytes.ReusingByteBufferAllocator;
+import org.apache.parquet.conf.ParquetConfiguration;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.util.AutoCloseables;
 import org.xerial.snappy.Snappy;
@@ -40,7 +39,7 @@ import org.xerial.snappy.Snappy;
  * Factory to produce compressors and decompressors that operate on java
  * direct memory, without requiring a copy into heap memory (where possible).
  */
-class DirectCodecFactory extends CodecFactory implements AutoCloseable {
+class DirectCodecFactory extends DefaultCompressionCodecFactory implements AutoCloseable {
 
   private final ByteBufferAllocator allocator;
 
@@ -51,7 +50,7 @@ class DirectCodecFactory extends CodecFactory implements AutoCloseable {
    *
    * @throws NullPointerException if allocator is {@code null}
    */
-  DirectCodecFactory(Configuration config, ByteBufferAllocator allocator, int pageSize) {
+  DirectCodecFactory(ParquetConfiguration config, ByteBufferAllocator allocator, int pageSize) {
     super(config, pageSize);
 
     this.allocator = java.util.Objects.requireNonNull(allocator, "allocator cannot be null");
@@ -194,7 +193,7 @@ class DirectCodecFactory extends CodecFactory implements AutoCloseable {
   }
 
   /**
-   * @deprecated Use {@link CodecFactory#NO_OP_DECOMPRESSOR} instead
+   * @deprecated Use {@link DefaultCompressionCodecFactory#NO_OP_DECOMPRESSOR} instead
    */
   @Deprecated
   public class NoopDecompressor extends BytesDecompressor {
@@ -416,7 +415,7 @@ class DirectCodecFactory extends CodecFactory implements AutoCloseable {
   }
 
   /**
-   * @deprecated Use {@link CodecFactory#NO_OP_COMPRESSOR} instead
+   * @deprecated Use {@link DefaultCompressionCodecFactory#NO_OP_COMPRESSOR} instead
    */
   @Deprecated
   public static class NoopCompressor extends BytesCompressor {
