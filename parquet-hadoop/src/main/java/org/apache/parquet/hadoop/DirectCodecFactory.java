@@ -17,6 +17,9 @@
  */
 package org.apache.parquet.hadoop;
 
+import com.aayushatharva.brotli4j.Brotli4jLoader;
+import com.aayushatharva.brotli4j.decoder.Decoder;
+import com.aayushatharva.brotli4j.encoder.Encoder;
 import com.github.luben.zstd.Zstd;
 import com.github.luben.zstd.ZstdCompressCtx;
 import com.github.luben.zstd.ZstdDecompressCtx;
@@ -25,7 +28,6 @@ import java.nio.ByteBuffer;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.Preconditions;
 import org.apache.parquet.bytes.ByteBufferAllocator;
-import org.apache.parquet.compression.Brotli4j;
 import org.apache.parquet.compression.DefaultCompressionCodecFactory;
 import org.apache.parquet.bytes.ByteBufferReleaser;
 import org.apache.parquet.bytes.BytesInput;
@@ -70,10 +72,7 @@ class DirectCodecFactory extends CodecFactory implements AutoCloseable {
       case LZ4_RAW:
         return new Lz4RawCompressor();
       case BROTLI:
-        if (Brotli4j.AVAILABLE) {
-          return new BrotliDirectCompressor();
-        }
-        return super.createCompressor(codecName);
+        return new BrotliDirectCompressor();
       case LZO:
       default:
         return super.createCompressor(codecName);
@@ -90,10 +89,7 @@ class DirectCodecFactory extends CodecFactory implements AutoCloseable {
       case LZ4_RAW:
         return new Lz4RawDecompressor();
       case BROTLI:
-        if (Brotli4j.AVAILABLE) {
-          return new BrotliDirectDecompressor();
-        }
-        // fall through to super (which throws UnsupportedOperationException)
+        return new BrotliDirectDecompressor();
       case GZIP:
       case LZO:
       case UNCOMPRESSED:
@@ -361,11 +357,15 @@ class DirectCodecFactory extends CodecFactory implements AutoCloseable {
    */
   private class BrotliDirectDecompressor extends BaseDecompressor {
 
+    BrotliDirectDecompressor() {
+      Brotli4jLoader.ensureAvailability();
+    }
+
     @Override
     int decompress(ByteBuffer input, ByteBuffer output) throws IOException {
       byte[] compressedBytes = new byte[input.remaining()];
       input.get(compressedBytes);
-      byte[] decompressed = Brotli4j.decompress(compressedBytes);
+      byte[] decompressed = Decoder.decompress(compressedBytes, 0, compressedBytes.length);
       output.put(decompressed);
       return decompressed.length;
     }
@@ -377,15 +377,16 @@ class DirectCodecFactory extends CodecFactory implements AutoCloseable {
   }
 
   /**
-   * Direct-memory Brotli compressor using brotli4j via reflection.
+   * Direct-memory Brotli compressor using brotli4j.
    * Uses quality=1 by default (fast compression, matching the old jbrotli default).
    * brotli4j only exposes a byte-array API, so input/output are copied through heap arrays.
    */
   private class BrotliDirectCompressor extends BaseCompressor {
-    private final Object params;
+    private final Encoder.Parameters params;
 
     BrotliDirectCompressor() {
-      this.params = Brotli4j.newParams(1);
+      Brotli4jLoader.ensureAvailability();
+      this.params = new Encoder.Parameters().setQuality(1);
     }
 
     @Override
@@ -403,7 +404,7 @@ class DirectCodecFactory extends CodecFactory implements AutoCloseable {
     int compress(ByteBuffer input, ByteBuffer output) throws IOException {
       byte[] inputBytes = new byte[input.remaining()];
       input.get(inputBytes);
-      byte[] compressed = Brotli4j.compress(inputBytes, params);
+      byte[] compressed = Encoder.compress(inputBytes, params);
       output.put(compressed);
       return compressed.length;
     }
