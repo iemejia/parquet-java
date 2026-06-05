@@ -99,6 +99,8 @@
     <brotli4j.version>1.23.0</brotli4j.version>
     <assertj.version>3.27.7</assertj.version>
     <junit.version>5.14.4</junit.version>
+    <snappy-java.version>1.1.10.8</snappy-java.version>
+    <aircompressor.version>2.0.3</aircompressor.version>
     <mockito.version>5.23.0</mockito.version>
     <net.openhft.version>0.27ea1</net.openhft.version>
     <build-helper-maven-plugin.version>3.6.1</build-helper-maven-plugin.version>
@@ -147,6 +149,7 @@
     <module>parquet-cli</module>
     <module>parquet-column</module>
     <module>parquet-common</module>
+    <module>parquet-compression</module>
     <module>parquet-encoding</module>
     <module>parquet-format-structures</module>
     <module>parquet-generator</module>
