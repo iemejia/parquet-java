@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.zip.Deflater;
 import org.apache.parquet.Preconditions;
+import org.apache.parquet.bytes.ByteBufferAllocator;
 import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.conf.ParquetConfiguration;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
@@ -92,6 +93,21 @@ public class DefaultCompressionCodecFactory implements CompressionCodecFactory {
   public DefaultCompressionCodecFactory(ParquetConfiguration configuration, int pageSize) {
     this.conf = configuration;
     this.pageSize = pageSize;
+  }
+
+  /**
+   * Create a codec factory that will provide compressors and decompressors
+   * that will work natively with ByteBuffers backed by direct memory.
+   *
+   * @param config    configuration options for different compression codecs
+   * @param allocator an allocator for creating result buffers during compression
+   *                  and decompression, must provide buffers backed by Direct memory
+   * @param pageSize  the default page size
+   * @return a configured direct codec factory
+   */
+  public static DefaultCompressionCodecFactory createDirectCodecFactory(
+      ParquetConfiguration config, ByteBufferAllocator allocator, int pageSize) {
+    return new DirectCodecFactory(config, allocator, pageSize);
   }
 
   @Override

@@ -29,10 +29,12 @@ import org.apache.parquet.conf.ParquetConfiguration;
  *
  * <p>This class adds constructors that accept Hadoop {@link Configuration} objects,
  * delegating all compression logic to the parent class which has no Hadoop dependency.
+ *
+ * @deprecated Use {@link DefaultCompressionCodecFactory} directly with {@link ParquetConfiguration}.
  */
+@Deprecated
 public class CodecFactory extends DefaultCompressionCodecFactory {
 
-  // Keep these constants here for backward compatibility with code that references CodecFactory.PARQUET_COMPRESS_ZSTD_*
   public static final String PARQUET_COMPRESS_ZSTD_LEVEL =
       DefaultCompressionCodecFactory.PARQUET_COMPRESS_ZSTD_LEVEL;
   public static final int DEFAULT_PARQUET_COMPRESS_ZSTD_LEVEL =
@@ -42,53 +44,21 @@ public class CodecFactory extends DefaultCompressionCodecFactory {
   public static final int DEFAULT_PARQUET_COMPRESS_ZSTD_WORKERS =
       DefaultCompressionCodecFactory.DEFAULT_PARQUET_COMPRESS_ZSTD_WORKERS;
 
-  /**
-   * Create a new codec factory.
-   *
-   * @param configuration used to pass compression codec configuration information
-   * @param pageSize      the expected page size, does not set a hard limit, currently just
-   *                      used to set the initial size of the output stream used when
-   *                      compressing a buffer. If this factory is only used to construct
-   *                      decompressors this parameter has no impact on the function of the factory
-   */
   public CodecFactory(Configuration configuration, int pageSize) {
     super(new HadoopParquetConfiguration(configuration), pageSize);
   }
 
-  /**
-   * Create a new codec factory.
-   *
-   * @param configuration used to pass compression codec configuration information
-   * @param pageSize      the expected page size, does not set a hard limit, currently just
-   *                      used to set the initial size of the output stream used when
-   *                      compressing a buffer. If this factory is only used to construct
-   *                      decompressors this parameter has no impact on the function of the factory
-   */
   public CodecFactory(ParquetConfiguration configuration, int pageSize) {
     super(configuration, pageSize);
   }
 
   /**
-   * Create a codec factory that will provide compressors and decompressors
-   * that will work natively with ByteBuffers backed by direct memory.
-   *
-   * @param config    configuration options for different compression codecs
-   * @param allocator an allocator for creating result buffers during compression
-   *                  and decompression, must provide buffers backed by Direct
-   *                  memory and return true for the isDirect() method
-   *                  on the ByteBufferAllocator interface
-   * @param pageSize  the default page size. This does not set a hard limit on the
-   *                  size of buffers that can be compressed, but performance may
-   *                  be improved by setting it close to the expected size of buffers
-   *                  (in the case of parquet, pages) that will be compressed. This
-   *                  setting is unused in the case of decompressing data, as parquet
-   *                  always records the uncompressed size of a buffer. If this
-   *                  CodecFactory is only going to be used for decompressors, this
-   *                  parameter will not impact the function of the factory.
-   * @return a configured direct codec factory
+   * @deprecated Use {@link DefaultCompressionCodecFactory#createDirectCodecFactory(ParquetConfiguration, ByteBufferAllocator, int)} instead.
    */
-  public static CodecFactory createDirectCodecFactory(
+  @Deprecated
+  public static DefaultCompressionCodecFactory createDirectCodecFactory(
       Configuration config, ByteBufferAllocator allocator, int pageSize) {
-    return new DirectCodecFactory(config, allocator, pageSize);
+    return DefaultCompressionCodecFactory.createDirectCodecFactory(
+        new HadoopParquetConfiguration(config), allocator, pageSize);
   }
 }
