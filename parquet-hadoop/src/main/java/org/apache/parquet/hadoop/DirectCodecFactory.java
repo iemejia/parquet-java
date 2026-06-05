@@ -28,7 +28,6 @@ import org.apache.parquet.bytes.ByteBufferAllocator;
 import org.apache.parquet.bytes.ByteBufferReleaser;
 import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.bytes.ReusingByteBufferAllocator;
-import org.apache.parquet.hadoop.codec.ZstandardCodec;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.util.AutoCloseables;
 import org.xerial.snappy.Snappy;
@@ -298,9 +297,9 @@ class DirectCodecFactory extends CodecFactory implements AutoCloseable {
     ZstdCompressor() {
       context = new ZstdCompressCtx();
       context.setLevel(conf.getInt(
-          ZstandardCodec.PARQUET_COMPRESS_ZSTD_LEVEL, ZstandardCodec.DEFAULT_PARQUET_COMPRESS_ZSTD_LEVEL));
+          PARQUET_COMPRESS_ZSTD_LEVEL, DEFAULT_PARQUET_COMPRESS_ZSTD_LEVEL));
       context.setWorkers(conf.getInt(
-          ZstandardCodec.PARQUET_COMPRESS_ZSTD_WORKERS, ZstandardCodec.DEFAULTPARQUET_COMPRESS_ZSTD_WORKERS));
+          PARQUET_COMPRESS_ZSTD_WORKERS, DEFAULT_PARQUET_COMPRESS_ZSTD_WORKERS));
     }
 
     @Override

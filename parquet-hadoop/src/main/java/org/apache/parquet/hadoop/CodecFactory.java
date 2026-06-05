@@ -43,7 +43,6 @@ import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.compression.CompressionCodecFactory;
 import org.apache.parquet.conf.HadoopParquetConfiguration;
 import org.apache.parquet.conf.ParquetConfiguration;
-import org.apache.parquet.hadoop.codec.ZstandardCodec;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,6 +51,12 @@ import org.xerial.snappy.Snappy;
 public class CodecFactory implements CompressionCodecFactory {
 
   private static final Logger LOG = LoggerFactory.getLogger(CodecFactory.class);
+
+  // ZSTD configuration constants (previously in ZstandardCodec)
+  public static final String PARQUET_COMPRESS_ZSTD_LEVEL = "parquet.compression.codec.zstd.level";
+  public static final int DEFAULT_PARQUET_COMPRESS_ZSTD_LEVEL = 3;
+  public static final String PARQUET_COMPRESS_ZSTD_WORKERS = "parquet.compression.codec.zstd.workers";
+  public static final int DEFAULT_PARQUET_COMPRESS_ZSTD_WORKERS = 0;
 
   private final Map<CompressionCodecName, BytesCompressor> compressors = new HashMap<>();
   private final Map<CompressionCodecName, BytesDecompressor> decompressors = new HashMap<>();
@@ -271,11 +276,11 @@ public class CodecFactory implements CompressionCodecFactory {
       case ZSTD:
         return new ZstdBytesCompressor(
             conf.getInt(
-                ZstandardCodec.PARQUET_COMPRESS_ZSTD_LEVEL,
-                ZstandardCodec.DEFAULT_PARQUET_COMPRESS_ZSTD_LEVEL),
+                PARQUET_COMPRESS_ZSTD_LEVEL,
+                DEFAULT_PARQUET_COMPRESS_ZSTD_LEVEL),
             conf.getInt(
-                ZstandardCodec.PARQUET_COMPRESS_ZSTD_WORKERS,
-                ZstandardCodec.DEFAULTPARQUET_COMPRESS_ZSTD_WORKERS));
+                PARQUET_COMPRESS_ZSTD_WORKERS,
+                DEFAULT_PARQUET_COMPRESS_ZSTD_WORKERS));
       case LZ4_RAW:
         return new Lz4RawBytesCompressor();
       case GZIP:
@@ -426,13 +431,10 @@ public class CodecFactory implements CompressionCodecFactory {
   // ---- Optimized ZSTD compressor/decompressor using zstd-jni context API directly ----
 
   /**
-   * Compresses using a reusable {@link ZstdCompressCtx}, bypassing the Hadoop codec
-   * framework ({@code ZstandardCodec}, {@code CodecPool}, {@code CompressionOutputStream}
-   * wrapper). The context is created once at construction and reused across calls,
-   * avoiding per-call JNI context creation, internal buffer allocation, and Java stream
-   * overhead. This is 1.5-3.4x faster than the streaming approach for typical Parquet
-   * page sizes (64KB-1MB). Multi-threaded compression via {@code workers > 0} is
-   * supported through {@link ZstdCompressCtx#setWorkers(int)}.
+   * Compresses using a reusable {@link ZstdCompressCtx}. The context is created once
+   * at construction and reused across calls, avoiding per-call JNI context creation,
+   * internal buffer allocation, and Java stream overhead. Multi-threaded compression
+   * via {@code workers > 0} is supported through {@link ZstdCompressCtx#setWorkers(int)}.
    */
   static class ZstdBytesCompressor extends BytesCompressor {
     private final ZstdCompressCtx context;
@@ -520,9 +522,7 @@ public class CodecFactory implements CompressionCodecFactory {
   // ---- Optimized LZ4_RAW compressor/decompressor using airlift LZ4 directly ----
 
   /**
-   * Compresses using airlift's LZ4 compressor directly with heap ByteBuffers,
-   * bypassing the Hadoop stream abstraction and NonBlockedCompressor's direct
-   * buffer copies.
+   * Compresses using airlift's LZ4 compressor directly with reusable direct ByteBuffers.
    */
   static class Lz4RawBytesCompressor extends BytesCompressor {
     private final Lz4Compressor compressor = new Lz4Compressor();
