@@ -25,6 +25,7 @@ import java.nio.ByteBuffer;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.Preconditions;
 import org.apache.parquet.bytes.ByteBufferAllocator;
+import org.apache.parquet.compression.Brotli4j;
 import org.apache.parquet.compression.DefaultCompressionCodecFactory;
 import org.apache.parquet.bytes.ByteBufferReleaser;
 import org.apache.parquet.bytes.BytesInput;
