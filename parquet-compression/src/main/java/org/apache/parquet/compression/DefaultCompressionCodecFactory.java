@@ -132,12 +132,8 @@ public class DefaultCompressionCodecFactory implements CompressionCodecFactory {
       case LZO:
         return new LzoCodec.Compressor(pageSize);
       case BROTLI:
-        if (Brotli4j.AVAILABLE) {
-          int brotliQuality = conf.getInt("compression.brotli.quality", 1);
-          return new BrotliCodec.Compressor(brotliQuality);
-        }
-        throw new UnsupportedOperationException(
-            "BROTLI codec requires brotli4j on the classpath (com.aayushatharva.brotli4j)");
+        int brotliQuality = conf.getInt("compression.brotli.quality", 1);
+        return new BrotliCodec.Compressor(brotliQuality);
       default:
         throw new UnsupportedOperationException("Codec not supported: " + codecName);
     }
@@ -158,11 +154,7 @@ public class DefaultCompressionCodecFactory implements CompressionCodecFactory {
       case LZO:
         return new LzoCodec.Decompressor();
       case BROTLI:
-        if (Brotli4j.AVAILABLE) {
-          return new BrotliCodec.Decompressor();
-        }
-        throw new UnsupportedOperationException(
-            "BROTLI codec requires brotli4j on the classpath (com.aayushatharva.brotli4j)");
+        return new BrotliCodec.Decompressor();
       default:
         throw new UnsupportedOperationException("Codec not supported: " + codecName);
     }

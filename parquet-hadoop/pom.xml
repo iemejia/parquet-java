@@ -161,13 +161,6 @@
       <artifactId>zstd-jni</artifactId>
       <version>${zstd-jni.version}</version>
     </dependency>
-    <dependency>
-      <groupId>com.aayushatharva.brotli4j</groupId>
-      <artifactId>brotli4j</artifactId>
-      <version>${brotli4j.version}</version>
-      <scope>runtime</scope>
-      <optional>true</optional>
-    </dependency>
 
     <dependency>
       <groupId>com.google.guava</groupId>

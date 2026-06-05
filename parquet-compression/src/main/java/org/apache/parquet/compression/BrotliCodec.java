@@ -18,34 +18,39 @@
  */
 package org.apache.parquet.compression;
 
+import com.aayushatharva.brotli4j.Brotli4jLoader;
+import com.aayushatharva.brotli4j.decoder.Decoder;
+import com.aayushatharva.brotli4j.encoder.Encoder;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 
 /**
- * Brotli compression codec using brotli4j ({@code com.aayushatharva.brotli4j}) via reflection.
+ * Brotli compression codec using brotli4j ({@code com.aayushatharva.brotli4j}).
+ * Single-call byte-array API for both compression and decompression.
  */
 final class BrotliCodec {
 
   private BrotliCodec() {}
 
-  /**
-   * Brotli compressor using brotli4j via reflection.
-   * Single-call byte-array API — no streaming overhead. Default quality=1
-   * matches the old jbrotli default and gives a good speed/ratio trade-off.
-   */
+  /** Ensure brotli4j native library is loaded before first use. */
+  static void ensureInitialized() {
+    Brotli4jLoader.ensureAvailability();
+  }
+
   static final class Compressor extends DefaultCompressionCodecFactory.BytesCompressor {
-    private final Object params;
+    private final Encoder.Parameters params;
 
     Compressor(int quality) {
-      this.params = Brotli4j.newParams(quality);
+      ensureInitialized();
+      this.params = new Encoder.Parameters().setQuality(quality);
     }
 
     @Override
     public BytesInput compress(BytesInput bytes) throws IOException {
       byte[] input = bytes.toByteArray();
-      byte[] compressed = Brotli4j.compress(input, params);
+      byte[] compressed = Encoder.compress(input, params);
       return BytesInput.from(compressed);
     }
 
@@ -58,32 +63,26 @@ final class BrotliCodec {
     public void release() {}
   }
 
-  /**
-   * Brotli decompressor using brotli4j via reflection.
-   * Single-call byte-array API. For the ByteBuffer overload the input slice
-   * is copied to a heap array, decompressed, and the result put into the
-   * output buffer — Brotli is slow enough that the copy overhead is negligible.
-   */
   static final class Decompressor extends DefaultCompressionCodecFactory.BytesDecompressor {
 
-    Decompressor() {}
+    Decompressor() {
+      ensureInitialized();
+    }
 
     @Override
     public BytesInput decompress(BytesInput bytes, int uncompressedSize) throws IOException {
       byte[] compressed = bytes.toByteArray();
-      byte[] decompressed = Brotli4j.decompress(compressed);
+      byte[] decompressed = Decoder.decompress(compressed, 0, compressed.length);
       return BytesInput.from(decompressed);
     }
 
     @Override
     public void decompress(ByteBuffer input, int compressedSize, ByteBuffer output, int decompressedSize)
         throws IOException {
-      ByteBuffer inputSlice = input.slice();
-      inputSlice.limit(compressedSize);
       byte[] compressedBytes = new byte[compressedSize];
-      inputSlice.get(compressedBytes);
+      input.slice().get(compressedBytes);
 
-      byte[] decompressed = Brotli4j.decompress(compressedBytes);
+      byte[] decompressed = Decoder.decompress(compressedBytes, 0, compressedBytes.length);
       output.put(decompressed);
       input.position(input.position() + compressedSize);
     }
