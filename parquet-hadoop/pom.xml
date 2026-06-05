@@ -147,32 +147,15 @@
       <version>${jackson-databind.version}</version>
     </dependency>
     <dependency>
-      <groupId>org.xerial.snappy</groupId>
-      <artifactId>snappy-java</artifactId>
-      <version>${snappy-java.version}</version>
-      <type>jar</type>
-      <scope>compile</scope>
-    </dependency>
-    <dependency>
       <groupId>org.locationtech.jts</groupId>
       <artifactId>jts-core</artifactId>
       <version>${jts.version}</version>
       <scope>test</scope>
     </dependency>
     <dependency>
-      <groupId>io.airlift</groupId>
-      <artifactId>aircompressor</artifactId>
-      <version>${aircompressor.version}</version>
-    </dependency>
-    <dependency>
       <groupId>it.unimi.dsi</groupId>
       <artifactId>fastutil</artifactId>
       <version>${fastutil.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>com.github.luben</groupId>
-      <artifactId>zstd-jni</artifactId>
-      <version>${zstd-jni.version}</version>
     </dependency>
 
     <dependency>
