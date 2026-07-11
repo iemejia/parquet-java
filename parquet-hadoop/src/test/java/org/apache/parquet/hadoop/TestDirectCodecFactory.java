@@ -501,7 +501,8 @@ public class TestDirectCodecFactory {
   public void brotliDirectFactoryRoundTrip() throws IOException {
     // Test through the DirectCodecFactory path where BROTLI bypass lives
     try (TrackingByteBufferAllocator alloc = TrackingByteBufferAllocator.wrap(new DirectByteBufferAllocator())) {
-      DefaultCompressionCodecFactory directFactory = CodecFactory.createDirectCodecFactory(new Configuration(), alloc, pageSize);
+      DefaultCompressionCodecFactory directFactory =
+          CodecFactory.createDirectCodecFactory(new Configuration(), alloc, pageSize);
       BytesInputCompressor compressor = directFactory.getCompressor(BROTLI);
       BytesInputDecompressor decompressor = directFactory.getDecompressor(BROTLI);
 
@@ -544,7 +545,8 @@ public class TestDirectCodecFactory {
 
     CodecFactory heapFactory = new CodecFactory(new Configuration(), pageSize);
     try (TrackingByteBufferAllocator alloc = TrackingByteBufferAllocator.wrap(new DirectByteBufferAllocator())) {
-      DefaultCompressionCodecFactory directFactory = CodecFactory.createDirectCodecFactory(new Configuration(), alloc, pageSize);
+      DefaultCompressionCodecFactory directFactory =
+          CodecFactory.createDirectCodecFactory(new Configuration(), alloc, pageSize);
 
       for (CompressionCodecName codec : codecs) {
         // heap compress -> direct decompress

@@ -121,8 +121,7 @@ class DirectCodecFactory extends DefaultCompressionCodecFactory implements AutoC
         ByteBuffer output = outputAllocator.allocate(decompressedSize);
         int size = decompress(input.slice(), output.slice());
         if (size != decompressedSize) {
-          throw new IOException(
-              "Unexpected decompressed size: " + size + " != " + decompressedSize);
+          throw new IOException("Unexpected decompressed size: " + size + " != " + decompressedSize);
         }
         output.limit(size);
         return BytesInput.from(output);
@@ -140,8 +139,7 @@ class DirectCodecFactory extends DefaultCompressionCodecFactory implements AutoC
       output.limit(output.position() + decompressedSize);
       int size = decompress(input.slice(), output.slice());
       if (size != decompressedSize) {
-        throw new IOException(
-            "Unexpected decompressed size: " + size + " != " + decompressedSize);
+        throw new IOException("Unexpected decompressed size: " + size + " != " + decompressedSize);
       }
       input.position(input.limit());
       input.limit(origInputLimit);
@@ -293,10 +291,8 @@ class DirectCodecFactory extends DefaultCompressionCodecFactory implements AutoC
 
     ZstdCompressor() {
       context = new ZstdCompressCtx();
-      context.setLevel(conf.getInt(
-          PARQUET_COMPRESS_ZSTD_LEVEL, DEFAULT_PARQUET_COMPRESS_ZSTD_LEVEL));
-      context.setWorkers(conf.getInt(
-          PARQUET_COMPRESS_ZSTD_WORKERS, DEFAULT_PARQUET_COMPRESS_ZSTD_WORKERS));
+      context.setLevel(conf.getInt(PARQUET_COMPRESS_ZSTD_LEVEL, DEFAULT_PARQUET_COMPRESS_ZSTD_LEVEL));
+      context.setWorkers(conf.getInt(PARQUET_COMPRESS_ZSTD_WORKERS, DEFAULT_PARQUET_COMPRESS_ZSTD_WORKERS));
     }
 
     @Override

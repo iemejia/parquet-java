@@ -35,8 +35,7 @@ import org.apache.parquet.conf.ParquetConfiguration;
 @Deprecated
 public class CodecFactory extends DefaultCompressionCodecFactory {
 
-  public static final String PARQUET_COMPRESS_ZSTD_LEVEL =
-      DefaultCompressionCodecFactory.PARQUET_COMPRESS_ZSTD_LEVEL;
+  public static final String PARQUET_COMPRESS_ZSTD_LEVEL = DefaultCompressionCodecFactory.PARQUET_COMPRESS_ZSTD_LEVEL;
   public static final int DEFAULT_PARQUET_COMPRESS_ZSTD_LEVEL =
       DefaultCompressionCodecFactory.DEFAULT_PARQUET_COMPRESS_ZSTD_LEVEL;
   public static final String PARQUET_COMPRESS_ZSTD_WORKERS =

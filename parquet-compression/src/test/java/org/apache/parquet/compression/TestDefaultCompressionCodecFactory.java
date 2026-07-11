@@ -107,13 +107,18 @@ public class TestDefaultCompressionCodecFactory {
     DefaultCompressionCodecFactory factoryLow = new DefaultCompressionCodecFactory(confLow, PAGE_SIZE);
     DefaultCompressionCodecFactory factoryHigh = new DefaultCompressionCodecFactory(confHigh, PAGE_SIZE);
 
-    long sizeLow = factoryLow.getCompressor(CompressionCodecName.ZSTD)
-        .compress(BytesInput.from(data)).size();
-    long sizeHigh = factoryHigh.getCompressor(CompressionCodecName.ZSTD)
-        .compress(BytesInput.from(data)).size();
+    long sizeLow = factoryLow
+        .getCompressor(CompressionCodecName.ZSTD)
+        .compress(BytesInput.from(data))
+        .size();
+    long sizeHigh = factoryHigh
+        .getCompressor(CompressionCodecName.ZSTD)
+        .compress(BytesInput.from(data))
+        .size();
 
     // Higher level should produce smaller output
-    assertTrue("ZSTD level=19 should compress better than level=1, got " + sizeHigh + " >= " + sizeLow,
+    assertTrue(
+        "ZSTD level=19 should compress better than level=1, got " + sizeHigh + " >= " + sizeLow,
         sizeHigh < sizeLow);
 
     factoryLow.release();
@@ -129,7 +134,8 @@ public class TestDefaultCompressionCodecFactory {
     byte[] data = compressibleData(64 * 1024);
 
     CompressionCodecFactory.BytesInputCompressor compressor = factory.getCompressor(CompressionCodecName.ZSTD);
-    CompressionCodecFactory.BytesInputDecompressor decompressor = factory.getDecompressor(CompressionCodecName.ZSTD);
+    CompressionCodecFactory.BytesInputDecompressor decompressor =
+        factory.getDecompressor(CompressionCodecName.ZSTD);
 
     BytesInput compressed = compressor.compress(BytesInput.from(data));
     BytesInput decompressed = decompressor.decompress(compressed, data.length);
@@ -153,12 +159,17 @@ public class TestDefaultCompressionCodecFactory {
     DefaultCompressionCodecFactory factoryFast = new DefaultCompressionCodecFactory(confFast, PAGE_SIZE);
     DefaultCompressionCodecFactory factoryBest = new DefaultCompressionCodecFactory(confBest, PAGE_SIZE);
 
-    long sizeFast = factoryFast.getCompressor(CompressionCodecName.GZIP)
-        .compress(BytesInput.from(data)).size();
-    long sizeBest = factoryBest.getCompressor(CompressionCodecName.GZIP)
-        .compress(BytesInput.from(data)).size();
+    long sizeFast = factoryFast
+        .getCompressor(CompressionCodecName.GZIP)
+        .compress(BytesInput.from(data))
+        .size();
+    long sizeBest = factoryBest
+        .getCompressor(CompressionCodecName.GZIP)
+        .compress(BytesInput.from(data))
+        .size();
 
-    assertTrue("GZIP level=9 should compress better than level=1, got " + sizeBest + " >= " + sizeFast,
+    assertTrue(
+        "GZIP level=9 should compress better than level=1, got " + sizeBest + " >= " + sizeFast,
         sizeBest < sizeFast);
 
     factoryFast.release();
@@ -193,7 +204,8 @@ public class TestDefaultCompressionCodecFactory {
     DefaultCompressionCodecFactory factory = createFactory();
     byte[] data = compressibleData(1024);
 
-    CompressionCodecFactory.BytesInputCompressor compressor = factory.getCompressor(CompressionCodecName.UNCOMPRESSED);
+    CompressionCodecFactory.BytesInputCompressor compressor =
+        factory.getCompressor(CompressionCodecName.UNCOMPRESSED);
     CompressionCodecFactory.BytesInputDecompressor decompressor =
         factory.getDecompressor(CompressionCodecName.UNCOMPRESSED);
 
