@@ -592,6 +592,12 @@
             <onlyModified>true</onlyModified>
             <ignoreMissingClassesByRegularExpressions>
               <ignoreMissingClassesByRegularExpression>${shade.prefix}.*</ignoreMissingClassesByRegularExpression>
+              <!-- commons-pool was a transitive dependency via Hadoop; no longer needed after
+                   extracting compression code to parquet-compression module -->
+              <ignoreMissingClassesByRegularExpression>org\.apache\.commons\.pool\..*</ignoreMissingClassesByRegularExpression>
+              <!-- CodecFactory inner classes (BytesCompressor, BytesDecompressor) removed in GH-3530;
+                   other classes still reference them in the old jar's signatures -->
+              <ignoreMissingClassesByRegularExpression>org\.apache\.parquet\.hadoop\.CodecFactory.*</ignoreMissingClassesByRegularExpression>
             </ignoreMissingClassesByRegularExpressions>
             <ignoreMissingOldVersion>true</ignoreMissingOldVersion>
             <excludeModules>
@@ -623,6 +629,37 @@
               <exclude>org.apache.parquet.avro.AvroReadSupport#AVRO_REQUESTED_PROJECTION</exclude>
               <exclude>org.apache.parquet.avro.AvroReadSupport#AVRO_DATA_SUPPLIER</exclude>
               <exclude>org.apache.parquet.hadoop.ParquetFileReader#PARQUET_READ_PARALLELISM</exclude>
+              <!-- Hadoop CompressionCodec implementations moved to parquet-compression module (GH-3530) -->
+              <exclude>org.apache.parquet.hadoop.codec.Lz4RawCodec</exclude>
+              <exclude>org.apache.parquet.hadoop.codec.Lz4RawCompressor</exclude>
+              <exclude>org.apache.parquet.hadoop.codec.Lz4RawDecompressor</exclude>
+              <exclude>org.apache.parquet.hadoop.codec.NonBlockedCompressor</exclude>
+              <exclude>org.apache.parquet.hadoop.codec.NonBlockedCompressorStream</exclude>
+              <exclude>org.apache.parquet.hadoop.codec.NonBlockedDecompressor</exclude>
+              <exclude>org.apache.parquet.hadoop.codec.NonBlockedDecompressorStream</exclude>
+              <exclude>org.apache.parquet.hadoop.codec.SnappyCodec</exclude>
+              <exclude>org.apache.parquet.hadoop.codec.SnappyCompressor</exclude>
+              <exclude>org.apache.parquet.hadoop.codec.SnappyDecompressor</exclude>
+              <exclude>org.apache.parquet.hadoop.codec.ZstandardCodec</exclude>
+              <exclude>org.apache.parquet.hadoop.codec.ZstdCompressorStream</exclude>
+              <exclude>org.apache.parquet.hadoop.codec.ZstdDecompressorStream</exclude>
+              <!-- CodecFactory refactored: now extends DefaultCompressionCodecFactory,
+                   inner classes BytesCompressor/BytesDecompressor moved to parent (GH-3530) -->
+              <exclude>org.apache.parquet.hadoop.CodecFactory</exclude>
+              <!-- DirectCodecFactory and all its public inner classes removed (GH-3530) -->
+              <exclude>org.apache.parquet.hadoop.DirectCodecFactory</exclude>
+              <exclude>org.apache.parquet.hadoop.DirectCodecFactory$DirectCodecPool$CodecPool</exclude>
+              <exclude>org.apache.parquet.hadoop.DirectCodecFactory$DirectCodecPool$ParquetCompressionCodecException</exclude>
+              <exclude>org.apache.parquet.hadoop.DirectCodecFactory$FullDirectDecompressor</exclude>
+              <exclude>org.apache.parquet.hadoop.DirectCodecFactory$IndirectDecompressor</exclude>
+              <exclude>org.apache.parquet.hadoop.DirectCodecFactory$NoopCompressor</exclude>
+              <exclude>org.apache.parquet.hadoop.DirectCodecFactory$NoopDecompressor</exclude>
+              <exclude>org.apache.parquet.hadoop.DirectCodecFactory$SnappyCompressor</exclude>
+              <exclude>org.apache.parquet.hadoop.DirectCodecFactory$SnappyDecompressor</exclude>
+              <!-- Deprecated constructors changed param type from CodecFactory.BytesCompressor
+                   to DefaultCompressionCodecFactory.BytesCompressor (GH-3530) -->
+              <exclude>org.apache.parquet.hadoop.ParquetRecordWriter</exclude>
+              <exclude>org.apache.parquet.hadoop.ColumnChunkPageWriteStore</exclude>
             </excludes>
           </parameter>
         </configuration>
