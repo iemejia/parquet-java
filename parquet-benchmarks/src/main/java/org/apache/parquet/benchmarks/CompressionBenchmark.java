@@ -25,7 +25,8 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.bytes.DirectByteBufferAllocator;
 import org.apache.parquet.compression.CompressionCodecFactory;
-import org.apache.parquet.hadoop.CodecFactory;
+import org.apache.parquet.compression.DefaultCompressionCodecFactory;
+import org.apache.parquet.conf.HadoopParquetConfiguration;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -46,7 +47,7 @@ import org.openjdk.jmh.annotations.Warmup;
  *
  * <p>Measures the performance of {@link CompressionCodecFactory.BytesInputCompressor}
  * and {@link CompressionCodecFactory.BytesInputDecompressor} for each supported codec,
- * comparing the heap-based {@link CodecFactory} path (what all production users take)
+ * comparing the heap-based {@link DefaultCompressionCodecFactory} path (what all production users take)
  * against the direct-memory {@code DirectCodecFactory} path (off-heap ByteBuffers).
  *
  * <p>This benchmark isolates the codec hot path from file I/O, encoding, and other
@@ -75,7 +76,7 @@ public class CompressionBenchmark {
 
   private CompressionCodecFactory.BytesInputCompressor compressor;
   private CompressionCodecFactory.BytesInputDecompressor decompressor;
-  private CodecFactory factory;
+  private DefaultCompressionCodecFactory factory;
 
   @Setup(Level.Trial)
   public void setup() throws IOException {
@@ -84,9 +85,10 @@ public class CompressionBenchmark {
 
     Configuration conf = new Configuration();
     if ("DIRECT".equals(factoryType)) {
-      factory = CodecFactory.createDirectCodecFactory(conf, DirectByteBufferAllocator.getInstance(), pageSize);
+      factory = DefaultCompressionCodecFactory.createDirectCodecFactory(
+          new HadoopParquetConfiguration(conf), DirectByteBufferAllocator.getInstance(), pageSize);
     } else {
-      factory = new CodecFactory(conf, pageSize);
+      factory = new DefaultCompressionCodecFactory(new HadoopParquetConfiguration(conf), pageSize);
     }
     CompressionCodecName codecName = CompressionCodecName.valueOf(codec);
 
