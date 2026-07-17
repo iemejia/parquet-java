@@ -34,6 +34,7 @@ import java.util.Random;
 import java.util.Set;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.compress.CompressionCodec;
+import org.apache.hadoop.io.compress.zlib.ZlibCompressor;
 import org.apache.parquet.bytes.ByteBufferAllocator;
 import org.apache.parquet.bytes.ByteBufferReleaser;
 import org.apache.parquet.bytes.BytesInput;
@@ -255,11 +256,14 @@ public class TestDirectCodecFactory {
 
   @Test
   public void cachingKeysGzip() {
+    // Hadoop's "zlib.compress.level" is read as a ZlibCompressor.CompressionLevel enum name
+    // (see ZlibFactory#getCompressionLevel), so it must hold an enum constant name rather than a
+    // raw numeric value. Hadoop 3.4.x's BuiltInGzipCompressor enforces this, unlike older versions.
     Configuration config_zlib_2 = new Configuration();
-    config_zlib_2.set("zlib.compress.level", "2");
+    config_zlib_2.set("zlib.compress.level", ZlibCompressor.CompressionLevel.TWO.name());
 
     Configuration config_zlib_5 = new Configuration();
-    config_zlib_5.set("zlib.compress.level", "5");
+    config_zlib_5.set("zlib.compress.level", ZlibCompressor.CompressionLevel.FIVE.name());
 
     final CodecFactory codecFactory_2 = new PublicCodecFactory(config_zlib_2, pageSize);
     final CodecFactory codecFactory_5 = new PublicCodecFactory(config_zlib_5, pageSize);
